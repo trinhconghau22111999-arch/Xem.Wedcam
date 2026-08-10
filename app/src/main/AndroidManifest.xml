@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Cần internet để kết nối Firebase (signaling) và truyền video WebRTC -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Máy Camera: cần camera sau để quay -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!-- Hiện thông báo liên tục khi camera/ghi hình đang chạy nền -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Giữ máy Camera không ngủ trong lúc đang truyền hình (tắt màn hình vẫn chạy) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Chỉ cần trên Android 9 trở xuống để lưu video vào thư mục Movies công khai
+         (Android 10+ dùng MediaStore API mới, không cần quyền này) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Xin loại trừ khỏi tối ưu pin để service không bị hệ thống giết khi màn hình tắt lâu -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RemoteAssist">
+
+        <!-- Màn hình chọn vai trò: Camera hay Máy Xem -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Máy B: màn hình xin sự đồng ý + tạo mã ghép nối cho camera -->
+        <activity android:name=".CameraActivity" android:exported="false" />
+
+        <!-- Máy A: màn hình nhập mã + xem/ghi hình từ camera -->
+        <activity android:name=".ViewerActivity" android:exported="false" />
+
+        <!--
+            Foreground Service trên Máy B: bật camera sau, giữ thông báo liên tục
+            trong suốt thời gian camera đang hoạt động (kể cả khi chưa ai xem).
+        -->
+        <service
+            android:name=".CameraStreamService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+
+        <!--
+            Foreground Service trên Máy A: giữ kết nối WebRTC + ghi các đoạn video 30 phút,
+            chạy độc lập với vòng đời màn hình xem.
+        -->
+        <service
+            android:name=".ViewerRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+    </application>
+</manifest>

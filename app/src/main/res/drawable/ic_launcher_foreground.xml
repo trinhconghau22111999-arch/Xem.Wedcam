@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Ý tưởng: 1 điện thoại (thiết bị được điều khiển) + con trỏ chuột đè lên góc dưới-phải
+    (thiết bị đang điều khiển) -> truyền tải đúng chức năng "Remote Assist" (chia sẻ màn hình +
+    điều khiển từ xa) mà không cần chữ.
+    Toàn bộ nằm trong vùng an toàn 66dp (bán kính 33dp quanh tâm 54,54) theo chuẩn Adaptive Icon,
+    để không bị các launcher cắt mất phần quan trọng khi mask theo hình tròn/vuông bo góc/giọt nước.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Vỏ điện thoại -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,24 L65,24 A8,8 0 0,1 73,32 L73,76 A8,8 0 0,1 65,84 L43,84 A8,8 0 0,1 35,76 L35,32 A8,8 0 0,1 43,32 Z" />
+
+    <!-- Màn hình hiển thị bên trong (thụt vào so với vỏ) -->
+    <path
+        android:fillColor="@color/ic_launcher_screen"
+        android:pathData="M40,30 L68,30 L68,72 L40,72 Z" />
+
+    <!-- Con trỏ chuột đè lên góc dưới-phải điện thoại -->
+    <path
+        android:fillColor="@color/ic_launcher_cursor"
+        android:pathData="M61.2,61.2 L61.2,82 L67.05,77.45 L70.3,83.95 L73.55,82.65 L70.3,75.5 L78.1,75.5 Z" />
+</vector>

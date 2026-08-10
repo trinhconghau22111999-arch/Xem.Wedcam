@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Lớp đơn sắc cho "Themed icon" (Android 13+ - Material You): hệ thống tự tô icon này theo màu
+    chủ đề (wallpaper) người dùng chọn, nên CHỈ được vẽ 1 màu phẳng duy nhất (không dùng nhiều
+    màu như ic_launcher_foreground.xml) - ghép nguyên khối vỏ điện thoại + con trỏ thành 1 hình.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,24 L65,24 A8,8 0 0,1 73,32 L73,76 A8,8 0 0,1 65,84 L43,84 A8,8 0 0,1 35,76 L35,32 A8,8 0 0,1 43,32 Z
+                          M61.2,61.2 L61.2,82 L67.05,77.45 L70.3,83.95 L73.55,82.65 L70.3,75.5 L78.1,75.5 Z" />
+</vector>

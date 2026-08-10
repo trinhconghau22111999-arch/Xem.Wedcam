@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nền icon app: xanh dương đậm - gợi liên tưởng "công nghệ/tin cậy", thường thấy ở các
+         app hỗ trợ từ xa (TeamViewer, AnyDesk...). -->
+    <color name="ic_launcher_background">#1B3A70</color>
+    <!-- Lớp "màn hình" bên trong điện thoại - xanh dương sáng hơn để tạo chiều sâu -->
+    <color name="ic_launcher_screen">#4C8DFF</color>
+    <!-- Con trỏ chuột - cam sáng, nổi bật trên nền xanh để rõ ý "đang điều khiển" -->
+    <color name="ic_launcher_cursor">#FFB020</color>
+</resources>

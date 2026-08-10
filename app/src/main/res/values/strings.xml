@@ -1,0 +1,28 @@
+<resources>
+    <string name="app_name">Camera Giám Sát Gia Đình</string>
+
+    <string name="consent_title">Dùng máy này làm camera giám sát</string>
+    <string name="consent_body">Ứng dụng này sẽ:\n\n• Bật camera SAU của máy này và truyền hình ảnh thời gian thực sang các thiết bị mà bạn cấp mã\n• Chạy nền liên tục — kể cả khi tắt màn hình — để camera hoạt động 24/7\n• Tự động kết nối lại nếu mạng bị gián đoạn giữa chừng\n\nChỉ những thiết bị nhập ĐÚNG mã 6 số hiện trên màn hình mới xem được. Máy xem KHÔNG thể điều khiển hay thao tác gì trên máy này. Bạn có thể bấm \"Kết thúc phiên\" để tắt camera bất cứ lúc nào.</string>
+    <string name="consent_checkbox">Tôi đồng ý dùng máy này làm camera giám sát</string>
+    <string name="btn_generate_code">Bắt đầu làm Camera</string>
+
+    <string name="pairing_code_label">Mã ghép nối của camera này</string>
+    <string name="pairing_code_hint">Nhập mã này trên máy dùng để xem camera</string>
+    <string name="btn_end_session">Kết thúc phiên</string>
+
+    <string name="controller_title">Danh sách camera đang xem</string>
+    <string name="controller_code_hint">Nhập mã 6 số</string>
+    <string name="camera_label_hint">Tên gợi nhớ (vd: Phòng khách)</string>
+    <string name="btn_connect">Kết nối</string>
+    <string name="btn_add_camera">+ Thêm camera</string>
+    <string name="checkbox_recording">Lưu video</string>
+    <string name="checkbox_recording_limit_reached">Đã đủ số camera được phép lưu video — camera này chỉ xem trực tiếp</string>
+
+    <string name="notif_channel_name">Camera giám sát</string>
+    <string name="notif_title">Đang chạy camera giám sát</string>
+    <string name="notif_text">Camera đang bật và sẵn sàng truyền hình ảnh. Chạm để kết thúc.</string>
+
+    <string name="viewer_notif_channel_name">Đang xem/ghi hình camera</string>
+    <string name="viewer_notif_title">Đang xem camera giám sát</string>
+    <string name="viewer_notif_text">Video được lưu liên tục theo từng đoạn 30 phút.</string>
+</resources>
