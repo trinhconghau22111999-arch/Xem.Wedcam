@@ -31,7 +31,7 @@ private const val TAG = "SegmentedRecorder"
  *   không cần tự giải mã YUV bằng tay.
  * - Một thread riêng liên tục rút dữ liệu đã mã hóa (encoder output) và ghi vào MediaMuxer.
  * - Khi đủ [segmentDurationMs], hoặc khi [stop] được gọi (mất kết nối / dừng thủ công), file
- *   hiện tại được CHỐT ĐÚNG CÁCH (signalEndOfStream -> rút hết buffer còn lại -> muxer.stop())
+ *   hiện tại được CHỐT ĐÚNG CÁCH (signalEndOfInputStream -> rút hết buffer còn lại -> muxer.stop())
  *   nên video đã quay được tới thời điểm đó luôn xem lại được, không bị hỏng file.
  *
  * Toàn bộ xử lý nặng (vẽ GL, encode, mux) chạy trên background thread riêng, không chặn luồng
@@ -182,9 +182,9 @@ class SegmentedRecorder(
 
         renderer?.releaseEglSurface {
             try {
-                codec.signalEndOfStream()
+                codec.signalEndOfInputStream()
             } catch (e: Exception) {
-                Log.w(TAG, "signalEndOfStream lỗi: ${e.message}")
+                Log.w(TAG, "signalEndOfInputStream lỗi: ${e.message}")
             }
             drainThread?.join(2000)
             try { codec.stop() } catch (_: Exception) {}
