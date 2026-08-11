@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Tự khởi động lại camera sau khi máy khởi động lại (mất điện, bật nguồn lại) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- Xin loại trừ khỏi tối ưu pin để service không bị hệ thống giết khi màn hình tắt lâu -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -47,6 +50,14 @@
 
         <!-- Máy B: màn hình xin sự đồng ý + tạo mã ghép nối cho camera -->
         <activity android:name=".CameraActivity" android:exported="false" />
+
+        <!-- Tự khởi động lại camera sau khi máy khởi động lại / app vừa được cập nhật -->
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Máy A: màn hình nhập mã + xem/ghi hình từ camera -->
         <activity android:name=".ViewerActivity" android:exported="false" />

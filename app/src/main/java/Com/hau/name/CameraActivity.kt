@@ -62,10 +62,10 @@ class CameraActivity : AppCompatActivity() {
 
     private fun restoreActiveSessionIfAny() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val activeCode = prefs.getString(KEY_ACTIVE_CODE, null) ?: return
-        roomCode = activeCode
+        val fixedCode = prefs.getString(KEY_FIXED_CODE, null) ?: return
+        roomCode = fixedCode
         checkboxConsent.isChecked = true
-        textPairingCode.text = activeCode
+        textPairingCode.text = fixedCode
         layoutPairingCode.visibility = android.view.View.VISIBLE
     }
 
@@ -100,12 +100,19 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Mã ghép nối giờ CỐ ĐỊNH theo từng máy — chỉ sinh ngẫu nhiên 1 LẦN DUY NHẤT khi máy này
+     * lần đầu được dùng làm camera, sau đó lưu lại vĩnh viễn và tái sử dụng mỗi lần mở app
+     * (kể cả sau khi "Kết thúc phiên" hay khởi động lại máy) — không đổi mã nữa.
+     */
     private fun generatePairingCodeAndStartService() {
-        val code = (100000..999999).random().toString()
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val code = prefs.getString(KEY_FIXED_CODE, null) ?: run {
+            val newCode = (100000..999999).random().toString()
+            prefs.edit().putString(KEY_FIXED_CODE, newCode).apply()
+            newCode
+        }
         roomCode = code
-
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-            .putString(KEY_ACTIVE_CODE, code).apply()
 
         val serviceIntent = Intent(this, CameraStreamService::class.java).apply {
             putExtra(CameraStreamService.EXTRA_ROOM_CODE, code)
@@ -146,21 +153,21 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    /** Kết thúc phiên: dừng camera, nhưng GIỮ NGUYÊN mã cố định để lần sau dùng lại được. */
     private fun endSession() {
         roomCode?.let { code ->
             com.google.firebase.database.FirebaseDatabase.getInstance().reference
                 .child("rooms").child(code).child("status").setValue("ended")
         }
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(KEY_ACTIVE_CODE).apply()
         stopService(Intent(this, CameraStreamService::class.java))
         layoutPairingCode.visibility = android.view.View.GONE
         checkboxConsent.isChecked = false
-        roomCode = null
     }
 
     companion object {
         private const val REQUEST_CODE_PERMISSIONS = 2001
         const val PREFS_NAME = "home_camera"
-        const val KEY_ACTIVE_CODE = "active_room_code"
+        /** Mã ghép nối cố định của máy này — sinh 1 lần, dùng mãi mãi. */
+        const val KEY_FIXED_CODE = "fixed_room_code"
     }
 }

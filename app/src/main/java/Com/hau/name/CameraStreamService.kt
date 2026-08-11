@@ -93,12 +93,40 @@ class CameraStreamService : Service() {
         wakeLock?.acquire()
     }
 
+    /**
+     * Nhiều điện thoại có nhiều ống kính SAU (thường/góc rộng/tele) — Camera2Enumerator không
+     * đảm bảo trả về đúng ống góc rộng nhất trước. Hàm này tính góc nhìn (FOV) thực tế của từng
+     * ống bằng thông số cảm biến + tiêu cự, chọn ống có FOV lớn nhất (quay được nhiều nhất trong
+     * phòng) — quan trọng với camera giám sát cố định 1 góc, không xoay được.
+     */
+    private fun pickWidestBackCamera(enumerator: Camera2Enumerator): String? {
+        val backCameras = enumerator.deviceNames.filter { enumerator.isBackFacing(it) }
+        if (backCameras.isEmpty()) return enumerator.deviceNames.firstOrNull()
+        if (backCameras.size == 1) return backCameras.first()
+
+        val cameraManager = getSystemService(CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        return backCameras.maxByOrNull { id ->
+            try {
+                val chars = cameraManager.getCameraCharacteristics(id)
+                val sensorSize = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                val focalLengths = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                val focal = focalLengths?.minOrNull() // tiêu cự nhỏ nhất = ống góc rộng nhất trong các mức zoom của ống đó
+                if (sensorSize != null && focal != null && focal > 0f) {
+                    // FOV ngang (độ) — chỉ cần so sánh tương đối nên không cần đổi ra radian
+                    2.0 * Math.atan((sensorSize.width / (2.0 * focal)))
+                } else 0.0
+            } catch (e: Exception) {
+                Log.w(TAG, "Không đọc được thông số ống kính $id: ${e.message}")
+                0.0
+            }
+        }
+    }
+
     private fun startCameraAndWebRTC(code: String) {
         surfaceTextureHelper = SurfaceTextureHelper.create("CameraCaptureThread", eglBase.eglBaseContext)
 
         val enumerator = Camera2Enumerator(this)
-        val backCameraName = enumerator.deviceNames.firstOrNull { enumerator.isBackFacing(it) }
-            ?: enumerator.deviceNames.firstOrNull()
+        val backCameraName = pickWidestBackCamera(enumerator)
         if (backCameraName == null) {
             Log.e(TAG, "Không tìm thấy camera nào trên thiết bị")
             stopSelf()
@@ -194,13 +222,13 @@ class CameraStreamService : Service() {
         openPeerConnectionAndOffer(code)
     }
 
+    /** Chỉ báo Firebase là phòng đã đóng — mã cố định (KEY_FIXED_CODE) KHÔNG bị xoá, giữ lại
+     *  để lần sau bấm "Bắt đầu làm Camera" dùng lại đúng mã cũ. */
     private fun markRoomEnded() {
         roomCode?.let { code ->
             com.google.firebase.database.FirebaseDatabase.getInstance().reference
                 .child("rooms").child(code).child("status").setValue("ended")
         }
-        getSharedPreferences(CameraActivity.PREFS_NAME, MODE_PRIVATE).edit()
-            .remove(CameraActivity.KEY_ACTIVE_CODE).apply()
     }
 
     private fun buildNotification(): android.app.Notification {
