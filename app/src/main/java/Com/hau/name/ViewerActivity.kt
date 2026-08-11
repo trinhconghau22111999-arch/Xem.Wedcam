@@ -83,11 +83,6 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_camera, null)
         val editCode = dialogView.findViewById<EditText>(R.id.edit_pairing_code)
         val editLabel = dialogView.findViewById<EditText>(R.id.edit_camera_label)
-        val checkboxRecord = dialogView.findViewById<CheckBox>(R.id.checkbox_want_recording)
-        checkboxRecord.isEnabled = svc.recordingCount() < MAX_RECORDING_CAMERAS
-        if (!checkboxRecord.isEnabled) {
-            checkboxRecord.text = getString(R.string.checkbox_recording_limit_reached)
-        }
 
         AlertDialog.Builder(this)
             .setTitle(R.string.btn_add_camera)
@@ -99,7 +94,9 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
                     return@setPositiveButton
                 }
                 val label = editLabel.text.toString().trim().ifEmpty { "Camera $code" }
-                val error = svc.addCamera(code, label, checkboxRecord.isChecked && checkboxRecord.isEnabled)
+                // Thêm camera ở chế độ chỉ xem trực tiếp trước — muốn ghi hình thì tick
+                // ô "Lưu video" ngay trên ô camera đó sau khi đã thêm (chỉ 1 chỗ duy nhất).
+                val error = svc.addCamera(code, label, wantRecording = false)
                 if (error != null) {
                     Toast.makeText(this, error, Toast.LENGTH_LONG).show()
                 } else {
