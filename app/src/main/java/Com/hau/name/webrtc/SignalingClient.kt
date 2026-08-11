@@ -11,15 +11,21 @@ import com.google.firebase.database.ValueEventListener
  *
  * Cấu trúc Firebase:
  * rooms/{code}/
- *   status         : "waiting" | "connected" | "ended"
- *   consentGivenAt : Long (ms)
- *   offer          : { sdp, type }        — Máy B (host) ghi, Máy A đọc
- *   answer         : { sdp, type }        — Máy A ghi, Máy B đọc
- *   iceCandidatesHost/   {pushId}: {sdpMid, sdpMLineIndex, candidate}  — Máy B ghi
- *   iceCandidatesCtrl/   {pushId}: {sdpMid, sdpMLineIndex, candidate}  — Máy A ghi
+ *   status          : "waiting" | "connected" | "ended"
+ *   consentGivenAt  : Long (ms)
+ *   hostGeneration  : Long — Máy B (host) sinh 1 giá trị MỚI mỗi lần bắt đầu 1 phiên đàm phán
+ *                     (lần đầu hoặc mỗi lần tự kết nối lại). Máy A theo dõi giá trị này để biết
+ *                     lúc nào cần bỏ toàn bộ offer/ICE candidate CŨ và chuyển sang nghe đúng dữ
+ *                     liệu của phiên MỚI — tránh việc đọc nhầm offer/ICE của lần kết nối trước
+ *                     (nguyên nhân khiến kết nối lại bằng mã cũ hay bị treo/thất bại).
+ *   gen/{generation}/
+ *     offer         : { sdp, type }        — Máy B ghi, Máy A đọc
+ *     answer        : { sdp, type }        — Máy A ghi, Máy B đọc
+ *     iceCandidatesHost/{pushId}: {...}     — Máy B ghi
+ *     iceCandidatesCtrl/{pushId}: {...}     — Máy A ghi
  *
- * [isHost] = true  → Máy B (được điều khiển)
- * [isHost] = false → Máy A (máy điều khiển)
+ * [isHost] = true  → Máy B (camera)
+ * [isHost] = false → Máy A (máy xem)
  */
 class SignalingClient(
     private val roomCode: String,
@@ -39,6 +45,12 @@ class SignalingClient(
     private val localIcePath get() = if (isHost) "iceCandidatesHost" else "iceCandidatesCtrl"
     private val remoteIcePath get() = if (isHost) "iceCandidatesCtrl" else "iceCandidatesHost"
 
+    /** "Thế hệ" đàm phán hiện tại — quyết định bởi Máy B. */
+    private var generation: Long = -1
+    /** Node Firebase tương ứng với [generation] hiện tại — nơi thực sự đọc/ghi offer/answer/ICE. */
+    private var genRef: DatabaseReference? = null
+
+    private var hostGenerationListener: ValueEventListener? = null
     private var offerListener: ValueEventListener? = null
     private var answerListener: ValueEventListener? = null
     private var iceListener: ValueEventListener? = null
@@ -47,7 +59,13 @@ class SignalingClient(
     /** Bắt đầu lắng nghe — gọi ngay sau khi PeerConnection đã sẵn sàng. */
     fun start() {
         if (isHost) {
-            // Máy B lắng nghe answer từ Máy A
+            // Máy B: mở 1 "thế hệ" đàm phán mới, dọn sạch dữ liệu đàm phán cũ, rồi công bố
+            // hostGeneration mới để Máy A (nếu đang lắng nghe) tự chuyển sang nghe đúng chỗ.
+            generation = System.currentTimeMillis()
+            genRef = room.child("gen").child(generation.toString())
+            room.child("gen").removeValue()
+            room.child("hostGeneration").setValue(generation)
+
             answerListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val sdp = snapshot.child("sdp").getValue(String::class.java) ?: return
@@ -55,34 +73,36 @@ class SignalingClient(
                 }
                 override fun onCancelled(error: DatabaseError) {}
             }
-            room.child("answer").addValueEventListener(answerListener!!)
-        } else {
-            // Máy A lắng nghe offer từ Máy B
-            offerListener = object : ValueEventListener {
+            genRef!!.child("answer").addValueEventListener(answerListener!!)
+
+            iceListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
-                    val sdp = snapshot.child("sdp").getValue(String::class.java) ?: return
-                    listener.onOfferReceived(sdp)
+                    snapshot.children.forEach { child ->
+                        val sdpMid = child.child("sdpMid").getValue(String::class.java) ?: return@forEach
+                        val sdpMLineIndex = child.child("sdpMLineIndex").getValue(Int::class.java) ?: return@forEach
+                        val candidate = child.child("candidate").getValue(String::class.java) ?: return@forEach
+                        listener.onIceCandidateReceived(sdpMid, sdpMLineIndex, candidate)
+                    }
                 }
                 override fun onCancelled(error: DatabaseError) {}
             }
-            room.child("offer").addValueEventListener(offerListener!!)
-        }
-
-        // Cả 2 đều lắng nghe ICE candidates của phía kia
-        iceListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { child ->
-                    val sdpMid = child.child("sdpMid").getValue(String::class.java) ?: return@forEach
-                    val sdpMLineIndex = child.child("sdpMLineIndex").getValue(Int::class.java) ?: return@forEach
-                    val candidate = child.child("candidate").getValue(String::class.java) ?: return@forEach
-                    listener.onIceCandidateReceived(sdpMid, sdpMLineIndex, candidate)
+            genRef!!.child(remoteIcePath).addValueEventListener(iceListener!!)
+        } else {
+            // Máy A: theo dõi hostGeneration — mỗi khi Máy B mở phiên đàm phán mới (giá trị đổi),
+            // tự gỡ listener của thế hệ cũ và chuyển hẳn sang nghe offer/ICE của thế hệ mới.
+            hostGenerationListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val gen = snapshot.getValue(Long::class.java) ?: return
+                    if (gen == generation) return
+                    generation = gen
+                    resubscribeToGeneration(gen)
                 }
+                override fun onCancelled(error: DatabaseError) {}
             }
-            override fun onCancelled(error: DatabaseError) {}
+            room.child("hostGeneration").addValueEventListener(hostGenerationListener!!)
         }
-        room.child(remoteIcePath).addValueEventListener(iceListener!!)
 
-        // Lắng nghe khi phía kia ngắt kết nối
+        // Lắng nghe khi phía kia chủ động kết thúc hẳn (không phải rớt mạng tạm thời)
         statusListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (snapshot.getValue(String::class.java) == "ended") {
@@ -94,16 +114,46 @@ class SignalingClient(
         room.child("status").addValueEventListener(statusListener!!)
     }
 
+    /** (Chỉ Máy A) Chuyển sang nghe offer + ICE candidate của Máy B trong thế hệ đàm phán mới. */
+    private fun resubscribeToGeneration(gen: Long) {
+        offerListener?.let { genRef?.child("offer")?.removeEventListener(it) }
+        iceListener?.let { genRef?.child(remoteIcePath)?.removeEventListener(it) }
+
+        genRef = room.child("gen").child(gen.toString())
+
+        offerListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val sdp = snapshot.child("sdp").getValue(String::class.java) ?: return
+                listener.onOfferReceived(sdp)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        genRef!!.child("offer").addValueEventListener(offerListener!!)
+
+        iceListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { child ->
+                    val sdpMid = child.child("sdpMid").getValue(String::class.java) ?: return@forEach
+                    val sdpMLineIndex = child.child("sdpMLineIndex").getValue(Int::class.java) ?: return@forEach
+                    val candidate = child.child("candidate").getValue(String::class.java) ?: return@forEach
+                    listener.onIceCandidateReceived(sdpMid, sdpMLineIndex, candidate)
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        genRef!!.child(remoteIcePath).addValueEventListener(iceListener!!)
+    }
+
     fun sendOffer(sdp: String) {
-        room.child("offer").setValue(mapOf("type" to "offer", "sdp" to sdp))
+        genRef?.child("offer")?.setValue(mapOf("type" to "offer", "sdp" to sdp))
     }
 
     fun sendAnswer(sdp: String) {
-        room.child("answer").setValue(mapOf("type" to "answer", "sdp" to sdp))
+        genRef?.child("answer")?.setValue(mapOf("type" to "answer", "sdp" to sdp))
     }
 
     fun sendIceCandidate(sdpMid: String, sdpMLineIndex: Int, candidate: String) {
-        room.child(localIcePath).push().setValue(
+        genRef?.child(localIcePath)?.push()?.setValue(
             mapOf("sdpMid" to sdpMid, "sdpMLineIndex" to sdpMLineIndex, "candidate" to candidate)
         )
     }
@@ -118,9 +168,10 @@ class SignalingClient(
 
     /** Dọn toàn bộ listener khi phiên kết thúc để tránh rò rỉ bộ nhớ. */
     fun release() {
-        offerListener?.let { room.child("offer").removeEventListener(it) }
-        answerListener?.let { room.child("answer").removeEventListener(it) }
-        iceListener?.let { room.child(remoteIcePath).removeEventListener(it) }
+        hostGenerationListener?.let { room.child("hostGeneration").removeEventListener(it) }
+        offerListener?.let { genRef?.child("offer")?.removeEventListener(it) }
+        answerListener?.let { genRef?.child("answer")?.removeEventListener(it) }
+        iceListener?.let { genRef?.child(remoteIcePath)?.removeEventListener(it) }
         statusListener?.let { room.child("status").removeEventListener(it) }
     }
 }

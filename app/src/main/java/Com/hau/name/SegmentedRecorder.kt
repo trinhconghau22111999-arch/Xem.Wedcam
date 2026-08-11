@@ -67,7 +67,15 @@ class SegmentedRecorder(
         outputDir.mkdirs()
     }
 
-    /** Gọi từ luồng nhận frame WebRTC (VideoTrack.addSink). Không block lâu. */
+    /**
+     * Gọi từ luồng nhận frame WebRTC (VideoTrack.addSink). Không block lâu.
+     *
+     * LƯU Ý: KHÔNG cắt đoạn mới khi độ phân giải khung hình thay đổi giữa chừng — WebRTC tự
+     * điều chỉnh độ phân giải liên tục theo chất lượng mạng (mạng yếu tự giảm nét, mạng khoẻ
+     * tự tăng lại), nên nếu cắt đoạn theo đó sẽ ra hàng loạt file vài giây một. Việc co giãn
+     * khung hình vào đúng kích thước bề mặt ghi đã có GPU (EglRenderer) tự lo, không cần can
+     * thiệp — cứ vẽ tiếp lên surface hiện tại là đủ.
+     */
     override fun onFrame(frame: VideoFrame) {
         if (released) return
         frame.retain()
@@ -75,9 +83,6 @@ class SegmentedRecorder(
             try {
                 if (encoder == null) {
                     startNewSegment(frame.rotatedWidth, frame.rotatedHeight)
-                } else if (frame.rotatedWidth != frameWidth || frame.rotatedHeight != frameHeight) {
-                    // Đổi độ phân giải giữa chừng (hiếm) -> chốt đoạn cũ, mở đoạn mới đúng kích thước.
-                    finishCurrentSegment(startNext = true, nextWidth = frame.rotatedWidth, nextHeight = frame.rotatedHeight)
                 }
                 eglRenderer?.onFrame(frame)
             } finally {

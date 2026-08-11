@@ -85,6 +85,11 @@ class ViewerRecordingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    override fun onCreate() {
+        super.onCreate()
+        restorePersistedCameras()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_ALL) {
             sessions.keys.toList().forEach { removeCamera(it) }
@@ -98,8 +103,45 @@ class ViewerRecordingService : Service() {
             startForeground(NOTIF_ID, buildNotification())
         }
         // Không xử lý gì thêm ở đây — thêm/xoá camera thực hiện qua các hàm public bên dưới,
-        // gọi trực tiếp từ ViewerActivity sau khi bind().
+        // gọi trực tiếp từ ViewerActivity sau khi bind(). Danh sách camera đã lưu từ trước
+        // được tự động khôi phục và kết nối lại ở onCreate(), kể cả khi Activity chưa mở.
         return START_STICKY
+    }
+
+    // ---- Lưu & khôi phục danh sách camera (sống sót qua thoát app / service bị hệ thống dừng) ----
+
+    private fun cameraListPrefs() = getSharedPreferences("viewer_cameras", MODE_PRIVATE)
+
+    private fun persistCameraList() {
+        val arr = org.json.JSONArray()
+        sessions.values.forEach { s ->
+            val obj = org.json.JSONObject()
+            obj.put("code", s.roomCode)
+            obj.put("label", s.label)
+            obj.put("recording", s.recordingEnabled)
+            arr.put(obj)
+        }
+        cameraListPrefs().edit().putString(KEY_CAMERA_LIST, arr.toString()).apply()
+    }
+
+    private fun restorePersistedCameras() {
+        val json = cameraListPrefs().getString(KEY_CAMERA_LIST, null) ?: return
+        try {
+            val arr = org.json.JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val code = obj.getString("code")
+                if (sessions.containsKey(code)) continue
+                val label = obj.optString("label", "Camera $code")
+                val recording = obj.optBoolean("recording", false)
+                val session = CameraSession(code, label, recording)
+                session.reconnectRunnable = Runnable { if (!session.removed) connectSession(session) }
+                sessions[code] = session
+                connectSession(session)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Không đọc được danh sách camera đã lưu: ${e.message}")
+        }
     }
 
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
@@ -125,6 +167,7 @@ class ViewerRecordingService : Service() {
         sessions[code] = session
         connectSession(session)
         updateNotification()
+        persistCameraList()
         return null
     }
 
@@ -143,6 +186,7 @@ class ViewerRecordingService : Service() {
             session.segmentedRecorder?.stop()
             session.segmentedRecorder = null
         }
+        persistCameraList()
         return null
     }
 
@@ -152,6 +196,7 @@ class ViewerRecordingService : Service() {
         session.reconnectRunnable?.let { handler.removeCallbacks(it) }
         teardownSession(session, finalizeRecording = true)
         updateNotification()
+        persistCameraList()
         if (sessions.isEmpty()) stopSelf()
     }
 
@@ -307,5 +352,6 @@ class ViewerRecordingService : Service() {
         private const val NOTIF_ID = 44
         private const val BASE_RECONNECT_DELAY_MS = 2000L
         private const val MAX_RECONNECT_DELAY_MS = 30_000L
+        private const val KEY_CAMERA_LIST = "camera_list_json"
     }
 }
