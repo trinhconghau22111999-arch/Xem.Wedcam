@@ -38,9 +38,15 @@ data class CameraSummary(
 /**
  * Một phiên kết nối tới 1 Máy Camera (B), giữ toàn bộ state WebRTC + ghi hình + reconnect
  * riêng cho camera đó. Máy xem (A) có thể giữ tối đa [MAX_CAMERAS] session cùng lúc.
+ *
+ * [viewerId]: mã định danh RIÊNG của máy xem này cho camera này — sinh 1 lần khi thêm camera,
+ * lưu lại vĩnh viễn (persistCameraList). Nhờ có mã này, Máy B phân biệt được từng máy xem để
+ * phục vụ tối đa 4 máy cùng lúc, và máy xem này luôn tái sử dụng đúng "kênh" riêng của mình
+ * mỗi lần tự kết nối lại — không bị lẫn với máy xem khác.
  */
 private class CameraSession(
     val roomCode: String,
+    val viewerId: String,
     var label: String,
     var recordingEnabled: Boolean
 ) {
@@ -117,6 +123,7 @@ class ViewerRecordingService : Service() {
         sessions.values.forEach { s ->
             val obj = org.json.JSONObject()
             obj.put("code", s.roomCode)
+            obj.put("viewerId", s.viewerId)
             obj.put("label", s.label)
             obj.put("recording", s.recordingEnabled)
             arr.put(obj)
@@ -132,9 +139,12 @@ class ViewerRecordingService : Service() {
                 val obj = arr.getJSONObject(i)
                 val code = obj.getString("code")
                 if (sessions.containsKey(code)) continue
+                // optString trả "" nếu thiếu (dữ liệu lưu từ bản cũ trước khi có viewerId)
+                // -> sinh mới cho tương thích ngược, sẽ được lưu lại đúng ở lần persist kế tiếp.
+                val viewerId = obj.optString("viewerId", "").ifEmpty { newViewerId() }
                 val label = obj.optString("label", "Camera $code")
                 val recording = obj.optBoolean("recording", false)
-                val session = CameraSession(code, label, recording)
+                val session = CameraSession(code, viewerId, label, recording)
                 session.reconnectRunnable = Runnable { if (!session.removed) connectSession(session) }
                 sessions[code] = session
                 connectSession(session)
@@ -143,6 +153,8 @@ class ViewerRecordingService : Service() {
             Log.w(TAG, "Không đọc được danh sách camera đã lưu: ${e.message}")
         }
     }
+
+    private fun newViewerId(): String = java.util.UUID.randomUUID().toString().take(12)
 
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
 
@@ -162,7 +174,7 @@ class ViewerRecordingService : Service() {
         if (wantRecording && recordingCount() >= MAX_RECORDING_CAMERAS) {
             return "Đã đạt tối đa $MAX_RECORDING_CAMERAS camera được phép ghi hình"
         }
-        val session = CameraSession(code, label, wantRecording)
+        val session = CameraSession(code, newViewerId(), label, wantRecording)
         session.reconnectRunnable = Runnable { if (!session.removed) connectSession(session) }
         sessions[code] = session
         connectSession(session)
@@ -195,6 +207,10 @@ class ViewerRecordingService : Service() {
         session.removed = true
         session.reconnectRunnable?.let { handler.removeCallbacks(it) }
         teardownSession(session, finalizeRecording = true)
+        // Báo ngay cho Máy B biết máy xem này đã rời hẳn, kể cả khi đang giữa lúc chờ tự kết nối
+        // lại (không có signalingClient đang sống) — để Máy B giải phóng slot ngay lập tức.
+        com.google.firebase.database.FirebaseDatabase.getInstance().reference
+            .child("rooms").child(session.roomCode).child("viewers").child(session.viewerId).removeValue()
         updateNotification()
         persistCameraList()
         if (sessions.isEmpty()) stopSelf()
@@ -221,6 +237,7 @@ class ViewerRecordingService : Service() {
 
         val sigClient = SignalingClient(
             roomCode = session.roomCode,
+            viewerId = session.viewerId,
             isHost = false,
             listener = object : SignalingClient.Listener {
                 override fun onOfferReceived(sdp: String) { session.peerConnectionManager?.handleOffer(sdp) }

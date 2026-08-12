@@ -7,28 +7,34 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 
 /**
- * Lớp trao đổi tín hiệu WebRTC (offer / answer / ICE candidates) qua Firebase Realtime Database.
+ * Lớp trao đổi tín hiệu WebRTC (offer / answer / ICE candidates) qua Firebase Realtime Database,
+ * cho ĐÚNG 1 cặp kết nối Máy B (camera) <-> 1 Máy A (máy xem) cụ thể, xác định bởi [viewerId].
+ *
+ * Vì 1 camera giờ phục vụ được NHIỀU máy xem cùng lúc (tối đa 4), mỗi máy xem có 1 "kênh" riêng
+ * biệt lập dưới rooms/{code}/viewers/{viewerId}/ — không đụng chạm tới các máy xem khác.
  *
  * Cấu trúc Firebase:
  * rooms/{code}/
- *   status          : "waiting" | "connected" | "ended"
- *   consentGivenAt  : Long (ms)
- *   hostGeneration  : Long — Máy B (host) sinh 1 giá trị MỚI mỗi lần bắt đầu 1 phiên đàm phán
- *                     (lần đầu hoặc mỗi lần tự kết nối lại). Máy A theo dõi giá trị này để biết
- *                     lúc nào cần bỏ toàn bộ offer/ICE candidate CŨ và chuyển sang nghe đúng dữ
- *                     liệu của phiên MỚI — tránh việc đọc nhầm offer/ICE của lần kết nối trước
- *                     (nguyên nhân khiến kết nối lại bằng mã cũ hay bị treo/thất bại).
- *   gen/{generation}/
- *     offer         : { sdp, type }        — Máy B ghi, Máy A đọc
- *     answer        : { sdp, type }        — Máy A ghi, Máy B đọc
- *     iceCandidatesHost/{pushId}: {...}     — Máy B ghi
- *     iceCandidatesCtrl/{pushId}: {...}     — Máy A ghi
+ *   consentGivenAt : Long (ms)
+ *   viewers/{viewerId}/
+ *     present        : true — Máy A ghi khi bắt đầu kết nối; dùng onDisconnect().removeValue()
+ *                      để Firebase TỰ xoá nếu máy A mất kết nối đột ngột (rớt mạng/tắt máy) —
+ *                      nhờ đó Máy B phát hiện và dọn dẹp đúng máy xem đã rời, không ảnh hưởng
+ *                      các máy xem khác.
+ *     hostGeneration : Long — Máy B sinh giá trị MỚI mỗi lần (re)bắt đầu đàm phán với RIÊNG máy
+ *                      xem này (lần đầu hoặc mỗi lần tự kết nối lại sau khi rớt mạng).
+ *     gen/{generation}/
+ *       offer          : { sdp, type }        — Máy B ghi, Máy A đọc
+ *       answer         : { sdp, type }        — Máy A ghi, Máy B đọc
+ *       iceCandidatesHost/{pushId}: {...}      — Máy B ghi
+ *       iceCandidatesCtrl/{pushId}: {...}      — Máy A ghi
  *
- * [isHost] = true  → Máy B (camera)
- * [isHost] = false → Máy A (máy xem)
+ * [isHost] = true  → đây là 1 trong các "kênh" phía Máy B, phục vụ riêng máy xem [viewerId]
+ * [isHost] = false → Máy A, dùng đúng 1 [viewerId] cố định của chính mình cho camera này
  */
 class SignalingClient(
-    private val roomCode: String,
+    roomCode: String,
+    viewerId: String,
     private val isHost: Boolean,
     private val listener: Listener
 ) {
@@ -39,13 +45,14 @@ class SignalingClient(
         fun onRemoteDisconnected()
     }
 
-    private val room: DatabaseReference =
-        FirebaseDatabase.getInstance().reference.child("rooms").child(roomCode)
+    private val viewerRef: DatabaseReference =
+        FirebaseDatabase.getInstance().reference
+            .child("rooms").child(roomCode).child("viewers").child(viewerId)
 
     private val localIcePath get() = if (isHost) "iceCandidatesHost" else "iceCandidatesCtrl"
     private val remoteIcePath get() = if (isHost) "iceCandidatesCtrl" else "iceCandidatesHost"
 
-    /** "Thế hệ" đàm phán hiện tại — quyết định bởi Máy B. */
+    /** "Thế hệ" đàm phán hiện tại của riêng kênh này — quyết định bởi Máy B. */
     private var generation: Long = -1
     /** Node Firebase tương ứng với [generation] hiện tại — nơi thực sự đọc/ghi offer/answer/ICE. */
     private var genRef: DatabaseReference? = null
@@ -54,17 +61,16 @@ class SignalingClient(
     private var offerListener: ValueEventListener? = null
     private var answerListener: ValueEventListener? = null
     private var iceListener: ValueEventListener? = null
-    private var statusListener: ValueEventListener? = null
+    private var presentListener: ValueEventListener? = null
 
     /** Bắt đầu lắng nghe — gọi ngay sau khi PeerConnection đã sẵn sàng. */
     fun start() {
         if (isHost) {
-            // Máy B: mở 1 "thế hệ" đàm phán mới, dọn sạch dữ liệu đàm phán cũ, rồi công bố
-            // hostGeneration mới để Máy A (nếu đang lắng nghe) tự chuyển sang nghe đúng chỗ.
+            // Máy B: mở 1 "thế hệ" đàm phán mới cho riêng máy xem này, dọn dữ liệu cũ.
             generation = System.currentTimeMillis()
-            genRef = room.child("gen").child(generation.toString())
-            room.child("gen").removeValue()
-            room.child("hostGeneration").setValue(generation)
+            genRef = viewerRef.child("gen").child(generation.toString())
+            viewerRef.child("gen").removeValue()
+            viewerRef.child("hostGeneration").setValue(generation)
 
             answerListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
@@ -87,8 +93,27 @@ class SignalingClient(
                 override fun onCancelled(error: DatabaseError) {}
             }
             genRef!!.child(remoteIcePath).addValueEventListener(iceListener!!)
+
+            // Máy B phát hiện máy xem này rời đi (Firebase tự xoá "present" khi rớt kết nối,
+            // hoặc máy xem tự xoá khi người dùng chủ động ngắt).
+            presentListener = object : ValueEventListener {
+                var sawPresent = false
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    if (snapshot.exists()) {
+                        sawPresent = true
+                    } else if (sawPresent) {
+                        listener.onRemoteDisconnected()
+                    }
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            viewerRef.child("present").addValueEventListener(presentListener!!)
         } else {
-            // Máy A: theo dõi hostGeneration — mỗi khi Máy B mở phiên đàm phán mới (giá trị đổi),
+            // Máy A: đánh dấu có mặt, tự dọn nếu mất kết nối Firebase đột ngột
+            viewerRef.child("present").setValue(true)
+            viewerRef.child("present").onDisconnect().removeValue()
+
+            // Theo dõi hostGeneration — mỗi khi Máy B mở phiên đàm phán mới (giá trị đổi),
             // tự gỡ listener của thế hệ cũ và chuyển hẳn sang nghe offer/ICE của thế hệ mới.
             hostGenerationListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
@@ -99,19 +124,8 @@ class SignalingClient(
                 }
                 override fun onCancelled(error: DatabaseError) {}
             }
-            room.child("hostGeneration").addValueEventListener(hostGenerationListener!!)
+            viewerRef.child("hostGeneration").addValueEventListener(hostGenerationListener!!)
         }
-
-        // Lắng nghe khi phía kia chủ động kết thúc hẳn (không phải rớt mạng tạm thời)
-        statusListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                if (snapshot.getValue(String::class.java) == "ended") {
-                    listener.onRemoteDisconnected()
-                }
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        }
-        room.child("status").addValueEventListener(statusListener!!)
     }
 
     /** (Chỉ Máy A) Chuyển sang nghe offer + ICE candidate của Máy B trong thế hệ đàm phán mới. */
@@ -119,7 +133,7 @@ class SignalingClient(
         offerListener?.let { genRef?.child("offer")?.removeEventListener(it) }
         iceListener?.let { genRef?.child(remoteIcePath)?.removeEventListener(it) }
 
-        genRef = room.child("gen").child(gen.toString())
+        genRef = viewerRef.child("gen").child(gen.toString())
 
         offerListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -159,19 +173,23 @@ class SignalingClient(
     }
 
     fun markConnected() {
-        room.child("status").setValue("connected")
+        // Giữ nguyên "present" — không cần đổi gì thêm, WebRTC tự báo trạng thái qua onConnected.
     }
 
+    /** (Chỉ Máy A) Chủ động rời khỏi camera này — Máy B sẽ phát hiện ngay lập tức. */
     fun markEnded() {
-        room.child("status").setValue("ended")
+        if (!isHost) {
+            viewerRef.child("present").onDisconnect().cancel()
+            viewerRef.removeValue()
+        }
     }
 
     /** Dọn toàn bộ listener khi phiên kết thúc để tránh rò rỉ bộ nhớ. */
     fun release() {
-        hostGenerationListener?.let { room.child("hostGeneration").removeEventListener(it) }
+        hostGenerationListener?.let { viewerRef.child("hostGeneration").removeEventListener(it) }
         offerListener?.let { genRef?.child("offer")?.removeEventListener(it) }
         answerListener?.let { genRef?.child("answer")?.removeEventListener(it) }
         iceListener?.let { genRef?.child(remoteIcePath)?.removeEventListener(it) }
-        statusListener?.let { room.child("status").removeEventListener(it) }
+        presentListener?.let { viewerRef.child("present").removeEventListener(it) }
     }
 }
