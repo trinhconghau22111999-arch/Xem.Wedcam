@@ -19,11 +19,6 @@
     <!-- Giữ máy Camera không ngủ trong lúc đang truyền hình (tắt màn hình vẫn chạy) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Chỉ cần trên Android 9 trở xuống để lưu video vào thư mục Movies công khai
-         (Android 10+ dùng MediaStore API mới, không cần quyền này) -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
-
     <!-- Tự khởi động lại camera sau khi máy khởi động lại (mất điện, bật nguồn lại) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -62,6 +57,10 @@
         <!-- Máy A: màn hình nhập mã + xem/ghi hình từ camera -->
         <activity android:name=".ViewerActivity" android:exported="false" />
 
+        <!-- Máy A: danh sách video đã lưu (4 cột A-D) + xem nhiều video cùng lúc -->
+        <activity android:name=".VideoGalleryActivity" android:exported="false" />
+        <activity android:name=".MultiViewPlayerActivity" android:exported="false" />
+
         <!--
             Foreground Service trên Máy B: bật camera sau, giữ thông báo liên tục
             trong suốt thời gian camera đang hoạt động (kể cả khi chưa ai xem).
@@ -72,8 +71,8 @@
             android:foregroundServiceType="camera" />
 
         <!--
-            Foreground Service trên Máy A: giữ kết nối WebRTC + ghi các đoạn video 30 phút,
-            chạy độc lập với vòng đời màn hình xem.
+            Foreground Service trên Máy A: giữ kết nối WebRTC + ghi các đoạn video 15 phút rồi
+            upload lên Drive (luân phiên tài khoản), chạy độc lập với vòng đời màn hình xem.
         -->
         <service
             android:name=".ViewerRecordingService"

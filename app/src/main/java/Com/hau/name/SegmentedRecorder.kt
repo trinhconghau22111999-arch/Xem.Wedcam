@@ -41,7 +41,9 @@ class SegmentedRecorder(
     private val eglContext: EglBase.Context,
     private val outputDir: File,
     private val segmentDurationMs: Long = 30 * 60 * 1000L,
-    private val onSegmentSaved: (File) -> Unit = {}
+    /** (file, thời điểm THỰC bắt đầu ghi đoạn này - epoch ms) — dùng thời điểm này (KHÔNG phải
+     *  giờ upload lên Drive) để ghép đúng hàng giữa các camera khi xem lại. */
+    private val onSegmentSaved: (File, Long) -> Unit = { _, _ -> }
 ) : VideoSink {
 
     private val workerThread = HandlerThread("SegmentedRecorderThread").apply { start() }
@@ -58,7 +60,7 @@ class SegmentedRecorder(
     private var frameWidth = 0
     private var frameHeight = 0
     private var currentFile: File? = null
-    private var segmentStartRealtimeMs = 0L
+    private var currentSegmentStartedAtMs = 0L
     private val rotateRunnable = Runnable { rotateSegment() }
 
     @Volatile private var released = false
@@ -94,8 +96,10 @@ class SegmentedRecorder(
     private fun startNewSegment(width: Int, height: Int) {
         frameWidth = width
         frameHeight = height
-        val file = File(outputDir, fileNameFor(Date()))
+        val startedAtMs = System.currentTimeMillis()
+        val file = File(outputDir, fileNameFor(Date(startedAtMs)))
         currentFile = file
+        currentSegmentStartedAtMs = startedAtMs
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -119,8 +123,13 @@ class SegmentedRecorder(
         renderer.createEglSurface(inputSurface)
         eglRenderer = renderer
 
-        segmentStartRealtimeMs = System.currentTimeMillis()
-        handler.postDelayed(rotateRunnable, segmentDurationMs)
+        // Căn lịch cắt đoạn kế tiếp theo ĐÚNG MỐC GIỜ THỰC (vd 15 phút thì luôn là :00/:15/:30/:45),
+        // KHÔNG phải "15 phút kể từ lúc bắt đầu ghi" — nhờ vậy các camera ghi độc lập, bắt đầu
+        // lệch giờ nhau (tự kết nối lại, thêm camera sau...) vẫn cùng cắt đoạn tại cùng 1 thời
+        // điểm tuyệt đối, giúp video các camera khác nhau nhưng cùng khung giờ khớp đúng 1 hàng
+        // khi xem lại (xem VideoGalleryActivity / VideoIndexer.buildTimeAlignedRows).
+        val delay = segmentDurationMs - (startedAtMs % segmentDurationMs)
+        handler.postDelayed(rotateRunnable, delay)
         startDrainThread(codec, newMuxer, file)
 
         Log.d(TAG, "Bắt đầu đoạn mới: ${file.name} (${width}x${height})")
@@ -183,6 +192,7 @@ class SegmentedRecorder(
         val codec = encoder ?: return
         val finishedMuxer = muxer
         val finishedFile = currentFile
+        val finishedStartedAtMs = currentSegmentStartedAtMs
         val renderer = eglRenderer
 
         renderer?.releaseEglSurface {
@@ -203,7 +213,7 @@ class SegmentedRecorder(
 
             finishedFile?.let {
                 Log.d(TAG, "Đã lưu đoạn: ${it.name}")
-                onSegmentSaved(it)
+                onSegmentSaved(it, finishedStartedAtMs)
             }
         }
         renderer?.release()

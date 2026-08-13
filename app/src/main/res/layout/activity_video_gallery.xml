@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/text_gallery_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textStyle="bold"
+            android:text="@string/gallery_title" />
+
+        <ProgressBar
+            android:id="@+id/progress_loading"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="6dp"
+        android:textSize="12sp"
+        android:textColor="#666666"
+        android:text="@string/gallery_hint" />
+
+    <!-- Hàng tiêu đề 4 cột A-D -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="4dp">
+
+        <TextView android:id="@+id/header_col_a" style="@style/GalleryColumnHeader" tools:text="(A) Phòng khách" />
+        <TextView android:id="@+id/header_col_b" style="@style/GalleryColumnHeader" tools:text="(B) Cổng" />
+        <TextView android:id="@+id/header_col_c" style="@style/GalleryColumnHeader" tools:text="(C) —" />
+        <TextView android:id="@+id/header_col_d" style="@style/GalleryColumnHeader" tools:text="(D) —" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/gallery_rows_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="4dp" />
+    </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/bar_selection_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:visibility="gone"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/text_selection_count"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            tools:text="Đã chọn 2 video cùng hàng" />
+
+        <Button
+            android:id="@+id/btn_view_together"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_view_together" />
+
+        <Button
+            android:id="@+id/btn_cancel_selection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/btn_cancel_selection" />
+    </LinearLayout>
+
+</LinearLayout>
