@@ -22,7 +22,7 @@
 
     <string name="drive_section_title">Lưu video vào Google Drive (không lưu trên máy)</string>
     <string name="btn_add_drive_account">+ Đăng nhập tài khoản Google</string>
-    <string name="btn_drive_reset_settings">⚙ Cài đặt tự xoá bớt</string>
+    <string name="btn_drive_reset_settings">⚙ Số ngày giữ video</string>
     <string name="btn_drive_remove">Gỡ</string>
     <string name="drive_max_accounts_reached">Đã đủ tối đa 20 tài khoản Google Drive</string>
     <string name="drive_account_already_added">Tài khoản này đã được đăng nhập rồi</string>
