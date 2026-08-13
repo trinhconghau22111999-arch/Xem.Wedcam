@@ -4,8 +4,14 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Phạm vi quyền Drive cần xin — cần đủ để đọc dung lượng (about) + tạo/xoá file trong thư mục riêng của app. */
-const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+/** Phạm vi quyền Drive cần xin — dùng "drive.file" (chỉ truy cập file DO CHÍNH APP TẠO RA,
+ *  không đụng tới file khác của người dùng) thay vì "drive" (toàn quyền). Đây là lựa chọn CHỦ
+ *  ĐÍCH: "drive.file" thuộc loại "Non-sensitive" theo phân loại của Google, KHÔNG cần app qua
+ *  bước "verification", KHÔNG cần khai báo trước từng tài khoản vào danh sách "Test users" —
+ *  bất kỳ tài khoản Google nào cũng đăng nhập được thẳng trong app (chỉ cần tự bấm qua 1 cảnh
+ *  báo "app chưa xác minh" ở lần đầu). Đủ dùng cho mọi thao tác của app (tạo thư mục riêng,
+ *  upload/tải/xoá/liệt kê, xem dung lượng) vì app chỉ đụng tới file/thư mục do chính nó tạo. */
+const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
 /** Tỉ lệ dung lượng trống tối thiểu để còn được coi là "còn chỗ" — dưới mức này coi là gần đầy, chuyển tài khoản kế tiếp. */
 const val NEAR_FULL_FREE_FRACTION = 0.05f
