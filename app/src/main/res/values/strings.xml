@@ -15,8 +15,27 @@
     <string name="camera_label_hint">Tên gợi nhớ (vd: Phòng khách)</string>
     <string name="btn_connect">Kết nối</string>
     <string name="btn_add_camera">+ Thêm camera</string>
-    <string name="checkbox_recording">Lưu video</string>
+    <string name="btn_grid_2x2">Tạo bảng 2x2</string>
+    <string name="btn_grid_list">Xem dạng danh sách</string>
+    <string name="checkbox_recording">Lưu video (lên Drive)</string>
     <string name="checkbox_recording_limit_reached">Đã đủ số camera được phép lưu video — camera này chỉ xem trực tiếp</string>
+
+    <string name="drive_section_title">Lưu video vào Google Drive (không lưu trên máy)</string>
+    <string name="btn_add_drive_account">+ Đăng nhập tài khoản Google</string>
+    <string name="btn_drive_reset_settings">⚙ Cài đặt tự xoá bớt</string>
+    <string name="btn_drive_remove">Gỡ</string>
+    <string name="drive_max_accounts_reached">Đã đủ tối đa 20 tài khoản Google Drive</string>
+    <string name="drive_account_already_added">Tài khoản này đã được đăng nhập rồi</string>
+
+    <string name="btn_open_gallery">Xem video đã lưu</string>
+    <string name="gallery_title">Video đã lưu (theo camera)</string>
+    <string name="gallery_hint">Nhấn giữ 1 video để chọn, chọn thêm video CÙNG HÀNG (tối đa 4) để xem cùng lúc</string>
+    <string name="gallery_empty">Chưa có video nào được lưu</string>
+    <string name="gallery_selected_count">Đã chọn %1$d video cùng hàng</string>
+    <string name="gallery_selected_need_more">Chọn thêm ít nhất 1 video cùng hàng nữa để xem cùng lúc</string>
+    <string name="btn_view_together">Xem cùng lúc</string>
+    <string name="btn_cancel_selection">Bỏ chọn</string>
+    <string name="btn_back_to_grid">Quay về xem lưới</string>
 
     <string name="notif_channel_name">Camera giám sát</string>
     <string name="notif_title">Đang chạy camera giám sát</string>
@@ -24,5 +43,5 @@
 
     <string name="viewer_notif_channel_name">Đang xem/ghi hình camera</string>
     <string name="viewer_notif_title">Đang xem camera giám sát</string>
-    <string name="viewer_notif_text">Video được lưu liên tục theo từng đoạn 30 phút.</string>
+    <string name="viewer_notif_text">Video được lưu liên tục theo từng đoạn 15 phút vào Google Drive.</string>
 </resources>

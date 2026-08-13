@@ -15,6 +15,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import Com.hau.name.webrtc.PeerConnectionManager
 import Com.hau.name.webrtc.SignalingClient
+import Com.hau.name.drive.DriveAccountManager
+import Com.hau.name.drive.DriveResetScheduler
+import Com.hau.name.drive.DriveUploader
 import org.webrtc.EglBase
 import org.webrtc.VideoSink
 import org.webrtc.VideoTrack
@@ -25,12 +28,16 @@ private const val TAG = "ViewerRecordingService"
 const val MAX_CAMERAS = 4
 const val MAX_RECORDING_CAMERAS = 4
 
+/** Ký tự gán cho từng "chỗ" camera (0..MAX_CAMERAS-1) — dùng để đặt tên video "tênCam (A).mp4". */
+fun slotLetter(slot: Int): Char = ('A' + slot)
+
 /** Trạng thái hiện tại của 1 camera đã thêm vào máy xem, hiển thị cho UI. */
 enum class CameraConnState { CONNECTING, CONNECTED, RECONNECTING, DISCONNECTED }
 
 data class CameraSummary(
     val roomCode: String,
     val label: String,
+    val slot: Int,
     val recordingEnabled: Boolean,
     val state: CameraConnState
 )
@@ -38,6 +45,10 @@ data class CameraSummary(
 /**
  * Một phiên kết nối tới 1 Máy Camera (B), giữ toàn bộ state WebRTC + ghi hình + reconnect
  * riêng cho camera đó. Máy xem (A) có thể giữ tối đa [MAX_CAMERAS] session cùng lúc.
+ *
+ * [slot]: vị trí cố định 0..[MAX_CAMERAS]-1 gán cho camera này khi thêm vào — quyết định ký tự
+ * (A)/(B)/(C)/(D) hiển thị trong tên và dùng để đặt tên file video, KHÔNG đổi khi camera khác
+ * bị xoá (để không nhầm lẫn video cũ đã lưu).
  *
  * [viewerId]: mã định danh RIÊNG của máy xem này cho camera này — sinh 1 lần khi thêm camera,
  * lưu lại vĩnh viễn (persistCameraList). Nhờ có mã này, Máy B phân biệt được từng máy xem để
@@ -47,6 +58,7 @@ data class CameraSummary(
 private class CameraSession(
     val roomCode: String,
     val viewerId: String,
+    val slot: Int,
     var label: String,
     var recordingEnabled: Boolean
 ) {
@@ -64,10 +76,11 @@ private class CameraSession(
 /**
  * Foreground Service trên Máy A (máy xem):
  * - Quản lý tối đa [MAX_CAMERAS] kết nối WebRTC song song, mỗi kết nối tới 1 Máy Camera
- *   khác nhau (mỗi máy có mã 6 số riêng).
+ *   khác nhau (mỗi máy có mã 6 số riêng), mỗi camera có 1 "chỗ" cố định (A)/(B)/(C)/(D).
  * - Tối đa [MAX_RECORDING_CAMERAS] trong số đó được BẬT GHI HÌNH (SegmentedRecorder, cắt
- *   đoạn 30 phút, lưu vào thư viện qua [MediaStoreVideoSaver]); các camera còn lại chỉ
- *   dùng để xem trực tiếp (live view), không ghi.
+ *   đoạn 15 phút). KHÔNG lưu gì trên máy xem — mỗi đoạn ghi xong được đẩy thẳng vào
+ *   [Com.hau.name.drive.DriveUploader] để lưu luân phiên lên các tài khoản Google Drive
+ *   đã đăng nhập; các camera còn lại chỉ dùng để xem trực tiếp (live view), không ghi.
  * - Mỗi camera tự động thử kết nối lại theo backoff khi rớt mạng/mất kết nối, độc lập
  *   với các camera khác — 1 camera rớt không ảnh hưởng camera khác.
  * - Toàn bộ chạy nền, độc lập vòng đời Activity.
@@ -84,6 +97,10 @@ class ViewerRecordingService : Service() {
     private var peerFactory: org.webrtc.PeerConnectionFactory? = null
     private val handler = Handler(Looper.getMainLooper())
 
+    private lateinit var driveAccountManager: DriveAccountManager
+    private lateinit var driveUploader: DriveUploader
+    private lateinit var driveResetScheduler: DriveResetScheduler
+
     var listener: Listener? = null
     interface Listener {
         fun onCameraStateChanged(roomCode: String, state: CameraConnState, message: String?)
@@ -93,6 +110,11 @@ class ViewerRecordingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        driveAccountManager = DriveAccountManager(this)
+        driveUploader = DriveUploader(this, driveAccountManager)
+        driveResetScheduler = DriveResetScheduler(this, driveAccountManager)
+        driveResetScheduler.start()
+        driveUploader.resumePendingUploads() // video nào chưa upload xong ở lần chạy trước sẽ được thử lại
         restorePersistedCameras()
     }
 
@@ -124,6 +146,7 @@ class ViewerRecordingService : Service() {
             val obj = org.json.JSONObject()
             obj.put("code", s.roomCode)
             obj.put("viewerId", s.viewerId)
+            obj.put("slot", s.slot)
             obj.put("label", s.label)
             obj.put("recording", s.recordingEnabled)
             arr.put(obj)
@@ -135,6 +158,7 @@ class ViewerRecordingService : Service() {
         val json = cameraListPrefs().getString(KEY_CAMERA_LIST, null) ?: return
         try {
             val arr = org.json.JSONArray(json)
+            val usedSlots = HashSet<Int>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val code = obj.getString("code")
@@ -144,7 +168,11 @@ class ViewerRecordingService : Service() {
                 val viewerId = obj.optString("viewerId", "").ifEmpty { newViewerId() }
                 val label = obj.optString("label", "Camera $code")
                 val recording = obj.optBoolean("recording", false)
-                val session = CameraSession(code, viewerId, label, recording)
+                // Dữ liệu lưu từ bản cũ trước khi có "slot" -> gán tạm slot trống nhỏ nhất.
+                var slot = obj.optInt("slot", -1)
+                if (slot < 0 || slot in usedSlots) slot = (0 until MAX_CAMERAS).firstOrNull { it !in usedSlots } ?: 0
+                usedSlots += slot
+                val session = CameraSession(code, viewerId, slot, label, recording)
                 session.reconnectRunnable = Runnable { if (!session.removed) connectSession(session) }
                 sessions[code] = session
                 connectSession(session)
@@ -158,8 +186,11 @@ class ViewerRecordingService : Service() {
 
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
 
+    fun getDriveAccountManager(): DriveAccountManager = driveAccountManager
+    fun getDriveResetScheduler(): DriveResetScheduler = driveResetScheduler
+
     fun listCameras(): List<CameraSummary> = sessions.values.map {
-        CameraSummary(it.roomCode, it.label, it.recordingEnabled, it.state)
+        CameraSummary(it.roomCode, it.label, it.slot, it.recordingEnabled, it.state)
     }
 
     fun recordingCount(): Int = sessions.values.count { it.recordingEnabled }
@@ -174,12 +205,20 @@ class ViewerRecordingService : Service() {
         if (wantRecording && recordingCount() >= MAX_RECORDING_CAMERAS) {
             return "Đã đạt tối đa $MAX_RECORDING_CAMERAS camera được phép ghi hình"
         }
-        val session = CameraSession(code, newViewerId(), label, wantRecording)
+        val slot = nextFreeSlot() ?: return "Đã đạt tối đa $MAX_CAMERAS camera"
+        val session = CameraSession(code, newViewerId(), slot, label, wantRecording)
         session.reconnectRunnable = Runnable { if (!session.removed) connectSession(session) }
         sessions[code] = session
         connectSession(session)
         updateNotification()
         persistCameraList()
+        return null
+    }
+
+    /** Chỗ (A)/(B)/(C)/(D) nhỏ nhất chưa dùng — camera bị xoá thì chỗ của nó được tái sử dụng cho camera thêm sau. */
+    private fun nextFreeSlot(): Int? {
+        val used = sessions.values.map { it.slot }.toSet()
+        for (i in 0 until MAX_CAMERAS) if (i !in used) return i
         return null
     }
 
@@ -303,9 +342,14 @@ class ViewerRecordingService : Service() {
         val recorder = SegmentedRecorder(
             eglContext = eglBase.eglBaseContext,
             outputDir = outDir,
-            onSegmentSaved = { file ->
-                Log.d(TAG, "Đoạn video camera ${session.roomCode} đã ghi xong: ${file.name}")
-                MediaStoreVideoSaver.saveToGallery(applicationContext, file, session.label)
+            segmentDurationMs = 15 * 60 * 1000L, // mỗi video chỉ 15 phút theo yêu cầu
+            onSegmentSaved = { file, startedAtMs ->
+                Log.d(TAG, "Đoạn video camera ${session.roomCode} đã ghi xong: ${file.name} — đưa vào hàng đợi upload Drive")
+                // KHÔNG lưu gì trên máy xem — video được đẩy thẳng vào hàng đợi upload luân
+                // phiên qua các tài khoản Google Drive đã đăng nhập (xem DriveUploader).
+                // Truyền kèm THỜI ĐIỂM THỰC bắt đầu ghi đoạn này (không phải giờ upload) để
+                // ghép đúng hàng giữa các camera khi xem lại.
+                driveUploader.enqueueUpload(file, session.label, slotLetter(session.slot), startedAtMs)
             }
         )
         session.segmentedRecorder = recorder
