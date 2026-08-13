@@ -38,7 +38,6 @@ object VideoIndexer {
     suspend fun fetchAll(context: Context, accountManager: DriveAccountManager): List<VideoEntry> {
         val out = ArrayList<VideoEntry>()
         accountManager.listAccounts().forEach { acc ->
-            if (acc.isResetting) return@forEach // đang xoá dở, danh sách chưa ổn định, bỏ qua lượt này
             try {
                 val token = DriveRest.getAccessToken(context, acc.email)
                 val folderId = DriveRest.getOrCreateAppFolder(token, acc.folderId)
@@ -52,17 +51,28 @@ object VideoIndexer {
     }
 
     private fun parseEntry(accountEmail: String, f: DriveFileRef): VideoEntry {
-        val withTs = NAME_REGEX_WITH_TS.find(f.name)
-        if (withTs != null) {
-            val (label, slot, ts) = withTs.destructured
-            val recordedAtMs = try { TS_PARSE_FMT.parse(ts)?.time } catch (e: Exception) { null } ?: f.createdTimeMs
-            return VideoEntry(accountEmail, f.id, f.name, label, slot.first(), recordedAtMs)
-        }
-        val legacy = NAME_REGEX_LEGACY.find(f.name)
-        val label = legacy?.groupValues?.get(1) ?: f.name.substringBeforeLast('.')
+        val recordedAtMs = extractRecordedAtMs(f.name, f.createdTimeMs)
+        val (label, slot) = extractLabelAndSlot(f.name)
+        return VideoEntry(accountEmail, f.id, f.name, label, slot, recordedAtMs)
+    }
+
+    /** Đọc thời điểm THỰC bắt đầu ghi từ tên file ("... yyyy-MM-dd_HH-mm-ss.mp4"); nếu tên file
+     *  không có (video cũ, bản trước khi có timestamp) thì trả về [fallbackMs] (giờ Drive nhận
+     *  file lúc upload — kém chính xác hơn nhưng còn hơn không có). Dùng chung cho việc ghép
+     *  hàng theo giờ thực VÀ việc dọn video quá hạn theo tuổi từng video (retention). */
+    fun extractRecordedAtMs(fileName: String, fallbackMs: Long): Long {
+        val m = NAME_REGEX_WITH_TS.find(fileName) ?: return fallbackMs
+        val ts = m.groupValues[3]
+        return try { TS_PARSE_FMT.parse(ts)?.time } catch (e: Exception) { null } ?: fallbackMs
+    }
+
+    private fun extractLabelAndSlot(fileName: String): Pair<String, Char> {
+        val withTs = NAME_REGEX_WITH_TS.find(fileName)
+        if (withTs != null) return withTs.groupValues[1] to withTs.groupValues[2].first()
+        val legacy = NAME_REGEX_LEGACY.find(fileName)
+        val label = legacy?.groupValues?.get(1) ?: fileName.substringBeforeLast('.')
         val slot = legacy?.groupValues?.get(2)?.firstOrNull() ?: '?'
-        // Video cũ chưa có timestamp trong tên -> đành dùng tạm giờ Drive nhận file lúc upload.
-        return VideoEntry(accountEmail, f.id, f.name, label, slot, f.createdTimeMs)
+        return label to slot
     }
 
     /**

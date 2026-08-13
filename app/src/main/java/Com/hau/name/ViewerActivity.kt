@@ -325,11 +325,7 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         val textStatus = view.findViewById<TextView>(R.id.text_drive_status)
         val btnRemove = view.findViewById<Button>(R.id.btn_drive_remove)
 
-        textOrder.text = when {
-            acc.isResetting -> "#${indexInOrder + 1} (đang xoá bớt...)"
-            indexInOrder == 0 -> "#1 (đang lưu vào đây)"
-            else -> "#${indexInOrder + 1}"
-        }
+        textOrder.text = if (indexInOrder == 0) "#1 (đang lưu vào đây)" else "#${indexInOrder + 1}"
         textEmail.text = acc.email
         textStatus.text = when {
             acc.totalBytes <= 0 -> "Chưa kiểm tra dung lượng"
@@ -358,17 +354,17 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         val mgr = svc.getDriveAccountManager()
         val editDays = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(mgr.resetIntervalDays.toString())
-            hint = "Số ngày (0 = tắt tự xoá)"
+            setText(mgr.retentionDays.toString())
+            hint = "Số ngày (0 = giữ vĩnh viễn)"
         }
         AlertDialog.Builder(this)
-            .setTitle("Tự xoá video để giải phóng bộ nhớ")
-            .setMessage("Sau bao nhiêu ngày thì tự xoá hết video của 1 tài khoản Drive để lấy lại chỗ trống? Tài khoản đó sẽ được chuyển xuống cuối danh sách sau khi xoá xong. Đặt 0 để tắt tính năng này.")
+            .setTitle("Tự xoá video cũ để giải phóng bộ nhớ")
+            .setMessage("Mỗi VIDEO được giữ lại bao nhiêu ngày kể từ lúc quay thì tự xoá đúng video đó (không xoá cả tài khoản) — video còn trong hạn không bị ảnh hưởng. Đặt 0 để giữ video vĩnh viễn cho tới khi tài khoản đầy dung lượng thật.")
             .setView(editDays)
             .setPositiveButton("Lưu") { _, _ ->
                 val days = editDays.text.toString().toIntOrNull() ?: 0
-                mgr.resetIntervalDays = days
-                Toast.makeText(this, "Đã lưu: $days ngày", Toast.LENGTH_SHORT).show()
+                mgr.retentionDays = days
+                Toast.makeText(this, "Đã lưu: giữ video $days ngày", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Huỷ", null)
             .show()

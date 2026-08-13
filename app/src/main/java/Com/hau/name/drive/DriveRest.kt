@@ -115,7 +115,12 @@ object DriveRest {
             JSONObject(body).getString("id")
         }
 
-    /** Xoá VĨNH VIỄN toàn bộ file trong 1 thư mục (dùng khi reset bộ nhớ định kỳ). */
+    /** Xoá VĨNH VIỄN 1 file theo id — dùng khi dọn video quá hạn theo tuổi từng video (retention). */
+    suspend fun deleteFile(token: String, fileId: String) = withContext(Dispatchers.IO) {
+        openConn("https://www.googleapis.com/drive/v3/files/$fileId", token, "DELETE").readBody()
+    }
+
+    /** Xoá VĨNH VIỄN toàn bộ file trong 1 thư mục (gỡ tài khoản / dọn sạch thủ công). */
     suspend fun deleteAllFilesInFolder(token: String, folderId: String) = withContext(Dispatchers.IO) {
         var pageToken: String? = null
         do {
@@ -127,7 +132,7 @@ object DriveRest {
             for (i in 0 until files.length()) {
                 val id = files.getJSONObject(i).getString("id")
                 try {
-                    openConn("https://www.googleapis.com/drive/v3/files/$id", token, "DELETE").readBody()
+                    deleteFile(token, id)
                 } catch (e: Exception) {
                     Log.w(TAG, "Không xoá được file $id: ${e.message}")
                 }

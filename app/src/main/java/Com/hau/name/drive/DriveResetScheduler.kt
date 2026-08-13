@@ -9,27 +9,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-private const val TAG = "DriveResetScheduler"
-private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L // kiểm tra mỗi 30 phút là đủ, không cần chính xác từng giây
+private const val TAG = "DriveRetentionCleaner"
+private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L // quét mỗi 30 phút là đủ, không cần chính xác từng giây
 
 /**
- * Cứ mỗi [DriveAccountManager.resetIntervalDays] ngày (tính từ lần đăng nhập/reset gần nhất),
- * XOÁ TOÀN BỘ video đang lưu trong tài khoản đó để giải phóng bộ nhớ, rồi đẩy tài khoản này
- * xuống CUỐI thứ tự luân phiên (các tài khoản còn dung lượng khác sẽ được ưu tiên lưu trước).
- * Trong lúc đang xoá (isResetting = true), tài khoản đó KHÔNG được chọn để lưu video mới
- * (xem [DriveAccountManager.candidatesInOrder] và [DriveUploader]).
+ * Dọn video QUÁ HẠN theo đúng TUỔI CỦA TỪNG VIDEO (không phải theo lịch của cả tài khoản):
+ * cứ mỗi [CHECK_INTERVAL_MS], quét toàn bộ video trong MỌI tài khoản Drive đã đăng nhập, video
+ * nào đã ghi được quá [DriveAccountManager.retentionDays] ngày (tính từ thời điểm ghi thực,
+ * đọc từ tên file — xem [VideoIndexer.extractRecordedAtMs]) thì bị xoá VĨNH VIỄN, các video
+ * còn trong hạn của tài khoản đó không bị đụng tới.
  *
- * resetIntervalDays = 0 -> tắt hẳn tính năng tự động reset (video chỉ ngừng lưu vào 1 tài khoản
- * khi tài khoản đó tự nhiên gần đầy dung lượng thật).
+ * retentionDays = 0 -> tắt hẳn tính năng dọn tự động (video giữ tới khi tài khoản đầy dung
+ * lượng thật, lúc đó [DriveUploader] tự chuyển sang tài khoản kế tiếp — không xoá gì).
+ *
+ * Vì đây là dọn dần liên tục theo tuổi video (không phải "xoá sạch 1 lần rồi xong"), tài khoản
+ * KHÔNG cần bị tạm khoá ghi trong lúc dọn, và cũng không cần đổi thứ tự ưu tiên của tài khoản —
+ * chỗ trống được giải phóng dần một cách tự nhiên.
  */
 class DriveResetScheduler(private val context: Context, private val accountManager: DriveAccountManager) {
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var started = false
+    /** Tránh quét trùng 1 tài khoản trong lúc lượt quét trước còn đang chạy dở (mạng chậm). */
+    private val cleaningNow = HashSet<String>()
 
     private val loop = object : Runnable {
         override fun run() {
-            checkAll()
+            runCleanupPass()
             handler.postDelayed(this, CHECK_INTERVAL_MS)
         }
     }
@@ -45,37 +51,44 @@ class DriveResetScheduler(private val context: Context, private val accountManag
         handler.removeCallbacks(loop)
     }
 
-    private fun checkAll() {
-        val intervalDays = accountManager.resetIntervalDays
-        if (intervalDays <= 0) return
-        val intervalMs = intervalDays * 24L * 60 * 60 * 1000
-        val now = System.currentTimeMillis()
+    private fun runCleanupPass() {
+        val days = accountManager.retentionDays
+        if (days <= 0) return
+        val cutoffMs = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000
         accountManager.listAccounts().forEach { acc ->
-            if (acc.isResetting) return@forEach
-            if (acc.lastResetAtMs <= 0) return@forEach
-            if (now - acc.lastResetAtMs >= intervalMs) {
-                scope.launch { performReset(acc.email) }
+            if (!cleaningNow.add(acc.email)) return@forEach // đang quét tài khoản này rồi, bỏ qua lượt này
+            scope.launch {
+                try {
+                    cleanupAccount(acc.email, cutoffMs)
+                } finally {
+                    cleaningNow.remove(acc.email)
+                }
             }
         }
     }
 
-    /** Có thể gọi thủ công (vd. nút "Reset ngay" trong Cài đặt) ngoài chu kỳ tự động. */
-    fun resetNow(email: String) {
-        scope.launch { performReset(email) }
-    }
-
-    private suspend fun performReset(email: String) {
-        accountManager.markResetting(email, true)
+    private suspend fun cleanupAccount(email: String, cutoffMs: Long) {
         try {
             val token = DriveRest.getAccessToken(context, email)
             val acc = accountManager.listAccounts().firstOrNull { it.email == email }
             val folderId = DriveRest.getOrCreateAppFolder(token, acc?.folderId)
-            DriveRest.deleteAllFilesInFolder(token, folderId)
-            accountManager.completeResetAndMoveToBottom(email)
-            Log.d(TAG, "Đã reset xong tài khoản $email, chuyển xuống cuối danh sách")
+            accountManager.setFolderId(email, folderId)
+
+            var deletedCount = 0
+            DriveRest.listVideos(token, folderId).forEach { f ->
+                val recordedAtMs = VideoIndexer.extractRecordedAtMs(f.name, f.createdTimeMs)
+                if (recordedAtMs in 1 until cutoffMs) {
+                    try {
+                        DriveRest.deleteFile(token, f.id)
+                        deletedCount++
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Không xoá được video quá hạn ${f.name} ($email): ${e.message}")
+                    }
+                }
+            }
+            if (deletedCount > 0) Log.d(TAG, "Đã dọn $deletedCount video quá hạn ở tài khoản $email")
         } catch (e: Exception) {
-            Log.w(TAG, "Reset tài khoản $email thất bại, sẽ thử lại ở lần kiểm tra sau: ${e.message}")
-            accountManager.markResetting(email, false)
+            Log.w(TAG, "Dọn video quá hạn cho $email thất bại, sẽ thử lại ở lượt quét sau: ${e.message}")
         }
     }
 }
