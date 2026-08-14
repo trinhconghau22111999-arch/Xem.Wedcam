@@ -37,6 +37,9 @@
     <string name="btn_cancel_selection">Bỏ chọn</string>
     <string name="btn_back_to_grid">Quay về xem lưới</string>
 
+    <string name="battery_optim_warning">Máy này chưa được loại trừ khỏi tối ưu pin — hệ thống có thể tự tắt việc ghi hình/upload khi màn hình tắt lâu. Nên bật để chạy ổn định.</string>
+    <string name="btn_battery_fix">Bỏ qua tối ưu pin cho app này</string>
+
     <string name="notif_channel_name">Camera giám sát</string>
     <string name="notif_title">Đang chạy camera giám sát</string>
     <string name="notif_text">Camera đang bật và sẵn sàng truyền hình ảnh. Chạm để kết thúc.</string>

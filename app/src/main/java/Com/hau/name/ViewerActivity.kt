@@ -137,6 +137,10 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
             startActivity(Intent(this, VideoGalleryActivity::class.java))
         }
 
+        findViewById<Button>(R.id.btn_battery_fix).setOnClickListener {
+            BatteryOptimizationHelper.requestIgnore(this)
+        }
+
         // Khởi động (nếu chưa chạy) + bind vào service ghi hình nền — service tồn tại độc
         // lập với Activity nên nếu đã có camera đang chạy từ trước, ta chỉ cần bind lại.
         val intent = Intent(this, ViewerRecordingService::class.java)
@@ -398,6 +402,9 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
             bound = true
         }
         driveRefreshHandler.post(driveRefreshRunnable)
+
+        findViewById<View>(R.id.banner_battery).visibility =
+            if (BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) View.GONE else View.VISIBLE
     }
 
     override fun onDestroy() {

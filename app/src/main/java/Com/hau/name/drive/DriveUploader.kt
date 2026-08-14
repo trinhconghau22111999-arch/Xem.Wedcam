@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -20,15 +21,24 @@ private const val MAX_ATTEMPTS_PER_FILE = 6
  *  upload (giờ upload trễ hơn giờ ghi thật vài giây tới vài phút tuỳ mạng, không dùng để ghép hàng được). */
 private val TIMESTAMP_FMT = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
 
+/** Phiên upload resumable đang dang dở của 1 file — lưu lại để lần retry sau TIẾP TỤC đúng chỗ
+ *  cũ (đúng tài khoản, đúng URL phiên), không mở phiên mới / tải lại từ đầu. */
+private data class PendingSession(val email: String, val uploadUrl: String, val folderId: String)
+
 /**
  * Nhận file video đã ghi xong 1 đoạn (15 phút), thử lưu lần lượt vào các tài khoản Drive theo
- * đúng thứ tự trong [DriveAccountManager] (từ trên xuống dưới). Tài khoản nào đang reset hoặc
- * gần đầy (dưới 5% dung lượng trống) bị BỎ QUA, thử tài khoản kế tiếp ngay trong cùng lần thử.
+ * đúng thứ tự trong [DriveAccountManager] (từ trên xuống dưới). Tài khoản nào gần đầy (dưới 5%
+ * dung lượng trống) bị BỎ QUA, thử tài khoản kế tiếp ngay trong cùng lần thử.
  *
  * File chỉ bị XOÁ khỏi máy xem SAU KHI upload thành công — nếu mất mạng/tất cả tài khoản đều
  * gần đầy, file được giữ nguyên trong [pendingDir] và sẽ được [resumePendingUploads] thử lại
  * mỗi khi service khởi động lại (kể cả sau khi app bị hệ thống dừng/khởi động lại máy) — không
  * có video nào bị mất kể cả khi upload chưa xong.
+ *
+ * Khi 1 lần upload bị đứt giữa chừng (mất mạng...), phiên upload đó được LƯU LẠI (file cạnh
+ * bên `.session`) — lần thử lại kế tiếp sẽ hỏi Drive "đã nhận tới byte nào" rồi gửi tiếp đúng
+ * phần còn thiếu, KHÔNG tải lại từ đầu. Chỉ khi phiên cũ hết hạn/lỗi mới bỏ đi và mở phiên mới
+ * (có thể sang tài khoản khác nếu tài khoản cũ vừa hết chỗ).
  */
 class DriveUploader(private val context: Context, private val accountManager: DriveAccountManager) {
 
@@ -58,7 +68,7 @@ class DriveUploader(private val context: Context, private val accountManager: Dr
     /** Gọi 1 lần khi ViewerRecordingService khởi động — thử lại mọi video còn tồn trong hàng đợi. */
     fun resumePendingUploads() {
         val files = pendingDir.listFiles() ?: return
-        files.forEach { f ->
+        files.filter { !it.name.endsWith(SESSION_SUFFIX) }.forEach { f ->
             val decoded = decodeQueuedName(f.name) ?: return@forEach
             val (label, slot, recordedAtMs) = decoded
             scope.launch { uploadWithRetry(f, label, slot, recordedAtMs) }
@@ -72,19 +82,43 @@ class DriveUploader(private val context: Context, private val accountManager: Dr
         while (file.exists()) {
             if (tryUploadOnce(file, fileName)) {
                 file.delete()
+                sessionFile(file).delete()
                 return
             }
             attempt++
             if (attempt >= MAX_ATTEMPTS_PER_FILE) {
-                Log.w(TAG, "Chưa upload được ${file.name} sau $attempt lần thử — giữ lại, sẽ thử tiếp lần sau service khởi động")
+                Log.w(TAG, "Chưa upload được ${file.name} sau $attempt lần thử — giữ lại (kèm phiên dang dở nếu có), sẽ thử tiếp lần sau service khởi động")
                 return
             }
             delay(minOf(30_000L * attempt, 5 * 60_000L))
         }
     }
 
-    /** Thử lần lượt từng tài khoản theo đúng thứ tự — trả về true nếu 1 tài khoản nào đó nhận được video. */
     private suspend fun tryUploadOnce(file: File, fileName: String): Boolean {
+        // 1) Có phiên upload dang dở từ lần thử trước -> ưu tiên TIẾP TỤC đúng phiên đó (đúng
+        //    tài khoản cũ), không mở phiên mới / không tải lại từ đầu.
+        readSession(file)?.let { session ->
+            try {
+                val token = DriveRest.getAccessToken(context, session.email)
+                val offset = DriveRest.queryResumeOffset(session.uploadUrl, file.length())
+                if (offset != null) {
+                    if (offset < file.length()) {
+                        DriveRest.uploadFromOffset(session.uploadUrl, file, offset)
+                    }
+                    Log.d(TAG, "Đã lưu $fileName vào Drive của ${session.email} (tiếp tục từ byte $offset/${file.length()})")
+                    return true
+                }
+                Log.w(TAG, "Phiên upload dang dở của ${session.email} đã hết hạn/không hợp lệ — mở phiên mới")
+                clearSession(file)
+            } catch (e: Exception) {
+                Log.w(TAG, "Lỗi khi tiếp tục phiên upload dang dở (${session.email}): ${e.message} — thử lại")
+                // Giữ nguyên session để lần sau thử tiếp — có thể chỉ là lỗi mạng tạm thời.
+                return false
+            }
+        }
+
+        // 2) Không có phiên dang dở (hoặc vừa bị huỷ vì hết hạn) -> mở phiên MỚI, thử lần lượt
+        //    từng tài khoản theo đúng thứ tự cho tới khi có 1 tài khoản nhận được.
         val candidates = accountManager.candidatesInOrder()
         if (candidates.isEmpty()) {
             Log.w(TAG, "Chưa có tài khoản Google Drive nào được đăng nhập — video đang chờ trong hàng đợi")
@@ -100,10 +134,23 @@ class DriveUploader(private val context: Context, private val accountManager: Dr
                 val freeFraction = if (total <= 0 || total == Long.MAX_VALUE) 1f else (total - used).toFloat() / total
                 if (freeFraction < NEAR_FULL_FREE_FRACTION) continue // gần đầy -> thử tài khoản kế tiếp ngay
 
-                val folderId = DriveRest.getOrCreateAppFolder(token, acc.folderId)
-                accountManager.setFolderId(acc.email, folderId)
+                var folderId = DriveRest.getOrCreateAppFolder(token, acc.folderId)
 
-                DriveRest.uploadResumable(token, folderId, fileName, file)
+                val uploadUrl = try {
+                    DriveRest.initResumableSession(token, folderId, fileName)
+                } catch (e: Exception) {
+                    // Hiếm khi xảy ra: thư mục cache đã bị xoá tay trong Drive (parent not found)
+                    // -> bỏ cache, tạo lại thư mục rồi thử mở phiên upload lại đúng 1 lần nữa.
+                    Log.w(TAG, "Mở phiên upload lỗi (có thể do thư mục cache đã mất): ${e.message} — tạo lại thư mục")
+                    folderId = DriveRest.getOrCreateAppFolder(token, null)
+                    DriveRest.initResumableSession(token, folderId, fileName)
+                }
+                accountManager.setFolderId(acc.email, folderId)
+                // Lưu phiên NGAY sau khi mở, TRƯỚC khi gửi dữ liệu — để nếu upload đứt giữa
+                // chừng ngay sau đây, lần retry kế tiếp vẫn biết phiên này mà tiếp tục.
+                saveSession(file, PendingSession(acc.email, uploadUrl, folderId))
+
+                DriveRest.uploadFromOffset(uploadUrl, file, 0L)
                 Log.d(TAG, "Đã lưu $fileName vào Drive của ${acc.email}")
                 return true
             } catch (e: Exception) {
@@ -113,7 +160,41 @@ class DriveUploader(private val context: Context, private val accountManager: Dr
         return false
     }
 
+    // ---- Lưu/đọc phiên upload dang dở (file .session cạnh file video trong hàng đợi) ----
+
+    private fun sessionFile(file: File) = File(file.parentFile, file.name + SESSION_SUFFIX)
+
+    private fun saveSession(file: File, session: PendingSession) {
+        try {
+            val obj = JSONObject().apply {
+                put("email", session.email)
+                put("uploadUrl", session.uploadUrl)
+                put("folderId", session.folderId)
+            }
+            sessionFile(file).writeText(obj.toString())
+        } catch (e: Exception) {
+            Log.w(TAG, "Không lưu được phiên upload dang dở: ${e.message}") // không sao, lần sau chỉ là mở phiên mới thay vì resume
+        }
+    }
+
+    private fun readSession(file: File): PendingSession? {
+        val f = sessionFile(file)
+        if (!f.exists()) return null
+        return try {
+            val obj = JSONObject(f.readText())
+            PendingSession(obj.getString("email"), obj.getString("uploadUrl"), obj.getString("folderId"))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun clearSession(file: File) {
+        sessionFile(file).delete()
+    }
+
     companion object {
+        private const val SESSION_SUFFIX = ".session"
+
         /** Mã hoá tên cam + slot + thời điểm ghi thực vào tên file hàng đợi, để đọc lại được sau khi service khởi động lại. */
         private fun encodeQueuedName(cameraLabel: String, slotLetter: Char, recordedAtMs: Long, originalName: String): String {
             val safeLabel = cameraLabel.replace("[|_]".toRegex(), " ")

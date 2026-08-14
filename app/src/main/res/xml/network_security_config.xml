@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mặc định từ Android 9 (API 28) trở lên, app KHÔNG được phép gọi HTTP thường (cleartext),
+    chỉ HTTPS. DriveStreamProxy chạy ngay trên máy (127.0.0.1) dùng HTTP thường cho đơn giản —
+    vì chỉ chính máy này gọi được vào (không ra khỏi thiết bị), nên cho phép cleartext CHỈ với
+    đúng địa chỉ loopback này, mọi kết nối khác (Firebase, Drive, WebRTC...) vẫn bắt buộc HTTPS.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

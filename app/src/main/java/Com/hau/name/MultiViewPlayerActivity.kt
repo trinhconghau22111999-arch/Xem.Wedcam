@@ -13,20 +13,16 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import Com.hau.name.drive.DriveRest
+import Com.hau.name.drive.DriveStreamProxy
 import Com.hau.name.drive.VideoEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
  * Xem cùng lúc 2-4 video đã chọn từ [VideoGalleryActivity] (cùng 1 hàng, tức cùng 1 mốc
- * thời gian ghi). Mỗi video được tải tạm về máy rồi phát bằng VideoView (Drive riêng tư
- * không phát trực tiếp qua URL công khai được).
+ * thời gian ghi). Mỗi video được PHÁT TRỰC TIẾP (stream) qua [DriveStreamProxy] — một máy chủ
+ * proxy nhỏ chạy ngay trên máy này, gắn token xác thực rồi chuyển tiếp yêu cầu sang Drive —
+ * KHÔNG cần tải hết file về máy trước mới xem được (có thể tua ngay cả khi đang tải).
  *
  * - Chạm 1 video đang xem cùng lúc -> video đó phóng to ra GIỮA màn hình, CÁC VIDEO KHÁC
  *   VẪN TIẾP TỤC CHẠY (không dừng) ở lưới nhỏ phía dưới lớp phóng to.
@@ -40,9 +36,7 @@ class MultiViewPlayerActivity : AppCompatActivity() {
         val entry: VideoEntry,
         val root: View,
         val videoView: android.widget.VideoView,
-        val progress: ProgressBar,
-        var localFile: File? = null,
-        var prepared: Boolean = false
+        val progress: ProgressBar
     )
 
     private lateinit var gridContainer: LinearLayout
@@ -65,7 +59,7 @@ class MultiViewPlayerActivity : AppCompatActivity() {
         if (entries.size < 2) { finish(); return }
 
         buildGrid(entries)
-        entries.forEachIndexed { i, e -> downloadAndPlay(i, e) }
+        panes.forEachIndexed { i, _ -> startStreaming(i) }
     }
 
     private fun buildGrid(entries: List<VideoEntry>) {
@@ -104,30 +98,25 @@ class MultiViewPlayerActivity : AppCompatActivity() {
         return Pane(entry, root, videoView, progress)
     }
 
-    private fun downloadAndPlay(index: Int, entry: VideoEntry) {
-        lifecycleScope.launch {
-            val pane = panes.getOrNull(index) ?: return@launch
-            try {
-                val dest = File(cacheDir, "multiview_${entry.fileId}.mp4")
-                if (!dest.exists()) {
-                    withContext(Dispatchers.IO) {
-                        val token = DriveRest.getAccessToken(this@MultiViewPlayerActivity, entry.accountEmail)
-                        DriveRest.downloadFile(token, entry.fileId, dest)
-                    }
-                }
-                pane.localFile = dest
-                pane.videoView.setVideoURI(Uri.fromFile(dest))
-                pane.videoView.setOnPreparedListener {
-                    it.isLooping = true
-                    pane.progress.visibility = View.GONE
-                    pane.prepared = true
-                    pane.videoView.start()
-                }
-                pane.videoView.start()
-            } catch (e: Exception) {
+    private fun startStreaming(index: Int) {
+        val pane = panes.getOrNull(index) ?: return
+        try {
+            val url = DriveStreamProxy.urlFor(this, pane.entry.fileId, pane.entry.accountEmail)
+            pane.videoView.setVideoURI(Uri.parse(url))
+            pane.videoView.setOnPreparedListener {
+                it.isLooping = true
                 pane.progress.visibility = View.GONE
-                Toast.makeText(this@MultiViewPlayerActivity, "Không tải được video: ${e.message}", Toast.LENGTH_LONG).show()
+                pane.videoView.start()
             }
+            pane.videoView.setOnErrorListener { _, what, extra ->
+                pane.progress.visibility = View.GONE
+                Toast.makeText(this, "Lỗi phát video: mã $what/$extra", Toast.LENGTH_SHORT).show()
+                true
+            }
+            pane.videoView.start()
+        } catch (e: Exception) {
+            pane.progress.visibility = View.GONE
+            Toast.makeText(this, "Không phát được video: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -187,8 +176,6 @@ class MultiViewPlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         panes.forEach { it.videoView.stopPlayback() }
-        // Xoá file tạm đã tải để không lưu lại video trên máy sau khi xem xong.
-        panes.forEach { it.localFile?.delete() }
         super.onDestroy()
     }
 
@@ -205,3 +192,4 @@ class MultiViewPlayerActivity : AppCompatActivity() {
         }
     }
 }
+

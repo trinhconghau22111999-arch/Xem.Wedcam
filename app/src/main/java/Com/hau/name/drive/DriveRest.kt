@@ -7,7 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -39,9 +38,14 @@ object DriveRest {
         used to (limit ?: Long.MAX_VALUE)
     }
 
-    /** Tìm hoặc tạo thư mục riêng của app trong Drive của tài khoản này, trả về folder id. */
+    /** Tìm hoặc tạo thư mục riêng của app trong Drive của tài khoản này, trả về folder id.
+     *  Nếu đã có [cachedFolderId] thì TIN TƯỞNG dùng luôn, KHÔNG gọi thêm 1 lượt mạng để kiểm
+     *  tra còn tồn tại hay không (folder rất hiếm khi bị xoá tay trong Drive) — trường hợp hiếm
+     *  đó thư mục đã bị xoá thì lệnh tạo file bên trong sẽ tự lỗi rõ ràng (404 parent not found),
+     *  DriveUploader khi đó sẽ tự bỏ cache và gọi lại hàm này với cachedFolderId = null để tạo
+     *  lại từ đầu — không cần tốn 1 lượt gọi mạng kiểm tra ở MỌI lần upload chỉ để phòng hờ. */
     suspend fun getOrCreateAppFolder(token: String, cachedFolderId: String?): String = withContext(Dispatchers.IO) {
-        if (cachedFolderId != null && folderStillExists(token, cachedFolderId)) return@withContext cachedFolderId
+        if (cachedFolderId != null) return@withContext cachedFolderId
 
         val q = "mimeType='application/vnd.google-apps.folder' and name='$APP_FOLDER_NAME' and trashed=false"
         val listUrl = "https://www.googleapis.com/drive/v3/files?q=" + java.net.URLEncoder.encode(q, "UTF-8") + "&fields=files(id)"
@@ -57,21 +61,14 @@ object DriveRest {
         JSONObject(createConn.readBody()).getString("id")
     }
 
-    private fun folderStillExists(token: String, folderId: String): Boolean = try {
-        val conn = openConn("https://www.googleapis.com/drive/v3/files/$folderId?fields=id,trashed", token, "GET")
-        val obj = JSONObject(conn.readBody())
-        !obj.optBoolean("trashed", false)
-    } catch (e: Exception) { false }
-
-    /**
-     * Upload theo kiểu resumable (bắt buộc cho file video vài trăm MB) — 1) mở phiên upload,
-     * 2) gửi toàn bộ file trong 1 lần PUT (đơn giản, đủ dùng cho file cỡ vài trăm MB qua wifi/4G;
-     * nếu cần chia nhỏ theo từng chunk có thể mở rộng thêm sau).
-     */
-    suspend fun uploadResumable(token: String, folderId: String, fileName: String, file: File): String =
+    /** Mở 1 phiên upload resumable MỚI, trả về URL phiên — URL này cần được LƯU LẠI (xem
+     *  DriveUploader) để nếu upload bị đứt giữa chừng, lần sau có thể hỏi Drive "đã nhận tới đâu"
+     *  rồi gửi tiếp phần còn thiếu, thay vì phải mở phiên mới và tải lại từ đầu. Phiên hết hạn
+     *  sau khoảng 1 tuần không dùng tới (đủ dư so với thời gian mất mạng thực tế). */
+    suspend fun initResumableSession(token: String, folderId: String, fileName: String): String =
         withContext(Dispatchers.IO) {
-            val initUrl = URL("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable")
-            val initConn = (initUrl.openConnection() as HttpURLConnection).apply {
+            val initConn = (URL("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable")
+                .openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Authorization", "Bearer $token")
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
@@ -89,30 +86,80 @@ object DriveRest {
             val uploadUrl = initConn.getHeaderField("Location")
                 ?: throw RuntimeException("Không nhận được địa chỉ upload (Location header)")
             initConn.disconnect()
+            uploadUrl
+        }
 
-            val putConn = (URL(uploadUrl).openConnection() as HttpURLConnection).apply {
+    /**
+     * Hỏi Drive đã nhận được tới byte thứ mấy của phiên upload này — dùng để RESUME đúng chỗ
+     * dang dở, không tải lại từ đầu. Trả về:
+     * - số byte đã nhận (0 nếu chưa nhận byte nào) -> gọi [uploadFromOffset] tiếp từ đó
+     * - đúng bằng [totalSize] nếu Drive báo đã nhận đủ (upload thực ra đã xong, chỉ là phản hồi
+     *   trước đó bị rớt mạng không tới máy) -> coi như thành công, không cần gửi gì thêm
+     * - null nếu phiên đã hết hạn/không hợp lệ -> phải bỏ phiên này, mở phiên MỚI từ đầu
+     */
+    suspend fun queryResumeOffset(uploadUrl: String, totalSize: Long): Long? = withContext(Dispatchers.IO) {
+        try {
+            val conn = (URL(uploadUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "PUT"
+                setRequestProperty("Content-Range", "bytes */$totalSize")
+                setFixedLengthStreamingMode(0)
+                doOutput = true
+                connectTimeout = 15_000
+                readTimeout = 15_000
+            }
+            conn.outputStream.close()
+            when (conn.responseCode) {
+                308 -> { // "Resume Incomplete" — header Range dạng "bytes=0-12345" = đã nhận tới byte 12345
+                    val range = conn.getHeaderField("Range")
+                    val lastByteReceived = range?.substringAfterLast('-')?.toLongOrNull()
+                    (lastByteReceived?.plus(1)) ?: 0L
+                }
+                200, 201 -> totalSize // Drive báo đã có file hoàn chỉnh rồi (mất phản hồi lần upload trước)
+                else -> null // 404/410 (hết hạn) hoặc lỗi khác -> coi như phiên không dùng được nữa
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Gửi phần CÒN LẠI của file (từ byte [startOffset] trở đi) lên phiên upload đã mở — dùng
+     * [startOffset] = 0 cho lần upload đầu tiên (gửi toàn bộ file), hoặc > 0 khi đang RESUME
+     * sau khi bị đứt giữa chừng (chỉ gửi phần chưa nhận, không gửi lại phần đã nhận). Trả về id
+     * file trên Drive khi upload xong hoàn toàn.
+     */
+    suspend fun uploadFromOffset(uploadUrl: String, file: File, startOffset: Long): String =
+        withContext(Dispatchers.IO) {
+            val totalSize = file.length()
+            val conn = (URL(uploadUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "PUT"
                 setRequestProperty("Content-Type", "video/mp4")
-                setFixedLengthStreamingMode(file.length())
+                if (startOffset > 0) {
+                    setRequestProperty("Content-Range", "bytes $startOffset-${totalSize - 1}/$totalSize")
+                }
+                setFixedLengthStreamingMode(totalSize - startOffset)
                 doOutput = true
                 connectTimeout = 30_000
                 readTimeout = 120_000
             }
-            FileInputStream(file).use { input ->
-                putConn.outputStream.use { output ->
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                raf.seek(startOffset)
+                conn.outputStream.use { output ->
                     val buf = ByteArray(256 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
+                    var remaining = totalSize - startOffset
+                    while (remaining > 0) {
+                        val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                        val n = raf.read(buf, 0, toRead)
                         if (n < 0) break
                         output.write(buf, 0, n)
+                        remaining -= n
                     }
                 }
             }
-            if (putConn.responseCode !in 200..299) {
-                throw RuntimeException("Upload thất bại: HTTP ${putConn.responseCode} ${putConn.readErrorBody()}")
+            if (conn.responseCode !in 200..299) {
+                throw RuntimeException("Upload thất bại: HTTP ${conn.responseCode} ${conn.readErrorBody()}")
             }
-            val body = putConn.readBody()
-            JSONObject(body).getString("id")
+            JSONObject(conn.readBody()).getString("id")
         }
 
     /** Xoá VĨNH VIỄN 1 file theo id — dùng khi dọn video quá hạn theo tuổi từng video (retention). */

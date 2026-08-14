@@ -58,6 +58,16 @@ class CameraActivity : AppCompatActivity() {
         // Nếu service camera đang chạy sẵn (vd. quay lại màn hình sau khi thoát app),
         // hiển thị lại mã đang hoạt động thay vì bắt bấm lại từ đầu.
         restoreActiveSessionIfAny()
+
+        findViewById<Button>(R.id.btn_battery_fix).setOnClickListener {
+            BatteryOptimizationHelper.requestIgnore(this)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        findViewById<android.view.View>(R.id.banner_battery).visibility =
+            if (BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     private fun restoreActiveSessionIfAny() {
