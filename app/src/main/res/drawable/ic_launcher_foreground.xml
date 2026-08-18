@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Ý tưởng: 1 điện thoại (thiết bị được điều khiển) + con trỏ chuột đè lên góc dưới-phải
-    (thiết bị đang điều khiển) -> truyền tải đúng chức năng "Remote Assist" (chia sẻ màn hình +
-    điều khiển từ xa) mà không cần chữ.
-    Toàn bộ nằm trong vùng an toàn 66dp (bán kính 33dp quanh tâm 54,54) theo chuẩn Adaptive Icon,
-    để không bị các launcher cắt mất phần quan trọng khi mask theo hình tròn/vuông bo góc/giọt nước.
+    Ý tưởng: 1 thân camera (thân bo góc + ô ngắm nhỏ phía trên) + ống kính tròn ở giữa + 1 chấm
+    đỏ "đang ghi/trực tiếp" ở góc trên-phải -> truyền tải đúng chức năng camera giám sát gia
+    đình đang hoạt động, không cần chữ.
+    Các hình chính nằm trong/gần vùng an toàn 66dp (bán kính 33dp quanh tâm 54,54) theo chuẩn
+    Adaptive Icon, để không bị các launcher cắt mất phần quan trọng khi mask theo hình tròn/
+    vuông bo góc/giọt nước.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,18 +13,28 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Vỏ điện thoại -->
+    <!-- Ô ngắm nhỏ phía trên thân camera -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M43,24 L65,24 A8,8 0 0,1 73,32 L73,76 A8,8 0 0,1 65,84 L43,84 A8,8 0 0,1 35,76 L35,32 A8,8 0 0,1 43,32 Z" />
+        android:pathData="M46,36 L62,36 A2,2 0 0,1 64,38 L64,44 L44,44 L44,38 A2,2 0 0,1 46,36 Z" />
 
-    <!-- Màn hình hiển thị bên trong (thụt vào so với vỏ) -->
+    <!-- Thân camera (bo góc) -->
     <path
-        android:fillColor="@color/ic_launcher_screen"
-        android:pathData="M40,30 L68,30 L68,72 L40,72 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,44 L78,44 A4,4 0 0,1 82,48 L82,72 A4,4 0 0,1 78,76 L36,76 A4,4 0 0,1 32,72 L32,48 A4,4 0 0,1 36,44 Z" />
 
-    <!-- Con trỏ chuột đè lên góc dưới-phải điện thoại -->
+    <!-- Vòng ngoài ống kính -->
     <path
-        android:fillColor="@color/ic_launcher_cursor"
-        android:pathData="M61.2,61.2 L61.2,82 L67.05,77.45 L70.3,83.95 L73.55,82.65 L70.3,75.5 L78.1,75.5 Z" />
+        android:fillColor="@color/ic_launcher_lens"
+        android:pathData="M41,60 A13,13 0 1,0 67,60 A13,13 0 1,0 41,60 Z" />
+
+    <!-- Kính ống kính (highlight giữa) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,60 A6,6 0 1,0 60,60 A6,6 0 1,0 48,60 Z" />
+
+    <!-- Chấm đỏ "đang ghi / đang trực tiếp" -->
+    <path
+        android:fillColor="@color/ic_launcher_rec_dot"
+        android:pathData="M70,50 A4,4 0 1,0 78,50 A4,4 0 1,0 70,50 Z" />
 </vector>

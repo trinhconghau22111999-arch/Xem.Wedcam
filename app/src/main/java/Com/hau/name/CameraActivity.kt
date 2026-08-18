@@ -73,6 +73,10 @@ class CameraActivity : AppCompatActivity() {
     private fun restoreActiveSessionIfAny() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val fixedCode = prefs.getString(KEY_FIXED_CODE, null) ?: return
+        // Quan trọng: chỉ hiện lại bảng mã (như đang hoạt động) nếu phiên THỰC SỰ đang chạy
+        // (cờ KEY_SESSION_ACTIVE) — có mã cố định không đồng nghĩa camera đang bật. Thiếu cờ
+        // này sẽ khiến app hiện nhầm "đang chạy" ngay cả khi đã bấm "Kết thúc phiên" từ trước.
+        if (!prefs.getBoolean(KEY_SESSION_ACTIVE, false)) return
         roomCode = fixedCode
         checkboxConsent.isChecked = true
         textPairingCode.text = fixedCode
@@ -139,37 +143,19 @@ class CameraActivity : AppCompatActivity() {
 
         textPairingCode.text = code
         layoutPairingCode.visibility = android.view.View.VISIBLE
+        prefs.edit().putBoolean(KEY_SESSION_ACTIVE, true).apply()
 
-        requestIgnoreBatteryOptimizations()
+        BatteryOptimizationHelper.requestIgnore(this)
     }
 
-    /**
-     * Xin loại trừ khỏi tối ưu pin (Doze/App Standby) — nếu không xin, một số hãng máy
-     * (Xiaomi, Oppo, Samsung...) có thể tự tắt app nền sau vài giờ kể cả khi màn hình tắt,
-     * làm gián đoạn camera. Đây là hộp thoại hệ thống, người dùng có thể từ chối.
-     */
-    private fun requestIgnoreBatteryOptimizations() {
-        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            try {
-                startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = android.net.Uri.parse("package:$packageName")
-                })
-            } catch (e: Exception) {
-                Toast.makeText(this,
-                    "Vui lòng vào Cài đặt > Pin > gỡ giới hạn nền cho app này để camera chạy ổn định khi tắt màn hình",
-                    Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    /** Kết thúc phiên: dừng camera, nhưng GIỮ NGUYÊN mã cố định để lần sau dùng lại được. */
+    /** Kết thúc phiên: dừng camera qua CÙNG 1 đường với nút "Kết thúc" trên notification
+     *  (ACTION_STOP_SHARING) — đảm bảo Firebase luôn được dọn sạch (status + viewers) như
+     *  nhau dù dừng từ đâu, và giữ nguyên mã cố định để lần sau dùng lại được. */
     private fun endSession() {
-        roomCode?.let { code ->
-            com.google.firebase.database.FirebaseDatabase.getInstance().reference
-                .child("rooms").child(code).child("status").setValue("ended")
-        }
-        stopService(Intent(this, CameraStreamService::class.java))
+        startService(Intent(this, CameraStreamService::class.java).apply {
+            action = CameraStreamService.ACTION_STOP_SHARING
+        })
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_SESSION_ACTIVE, false).apply()
         layoutPairingCode.visibility = android.view.View.GONE
         checkboxConsent.isChecked = false
     }
@@ -179,5 +165,8 @@ class CameraActivity : AppCompatActivity() {
         const val PREFS_NAME = "home_camera"
         /** Mã ghép nối cố định của máy này — sinh 1 lần, dùng mãi mãi. */
         const val KEY_FIXED_CODE = "fixed_room_code"
+        /** true khi phiên camera THỰC SỰ đang chạy (không chỉ là "đã từng có mã") — dùng để
+         *  UI không hiện nhầm "đang hoạt động" sau khi đã bấm Kết thúc rồi mở lại app. */
+        const val KEY_SESSION_ACTIVE = "session_active"
     }
 }

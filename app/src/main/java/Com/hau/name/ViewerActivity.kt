@@ -133,6 +133,9 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
 
     private fun rebuildAllTiles() {
         val svc = service ?: return
+        // Release đúng các renderer CŨ trước khi bỏ đi — tránh rò rỉ tài nguyên GL mỗi lần
+        // Activity bind lại vào service (ví dụ chuyển app đi/về nhiều lần).
+        tiles.values.forEach { it.renderer.release() }
         listContainer.removeAllViews()
         tiles.clear()
         svc.listCameras().forEach { summary ->

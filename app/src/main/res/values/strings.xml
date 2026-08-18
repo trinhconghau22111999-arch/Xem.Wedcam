@@ -18,7 +18,6 @@
     <string name="btn_grid_2x2">Tạo bảng 2x2</string>
     <string name="btn_grid_list">Xem dạng danh sách</string>
     <string name="checkbox_recording">Lưu video (trên máy này)</string>
-    <string name="checkbox_recording_limit_reached">Đã đủ số camera được phép lưu video — camera này chỉ xem trực tiếp</string>
 
     <string name="storage_section_title">Video được lưu vĩnh viễn trên máy này</string>
     <string name="btn_video_retention_settings">⚙ Số ngày giữ video</string>
@@ -33,7 +32,7 @@
     <string name="btn_cancel_selection">Bỏ chọn</string>
     <string name="btn_back_to_grid">Quay về xem lưới</string>
 
-    <string name="battery_optim_warning">Máy này chưa được loại trừ khỏi tối ưu pin — hệ thống có thể tự tắt việc ghi hình/upload khi màn hình tắt lâu. Nên bật để chạy ổn định.</string>
+    <string name="battery_optim_warning">Máy này chưa được loại trừ khỏi tối ưu pin — hệ thống có thể tự tắt việc quay/ghi hình khi màn hình tắt lâu. Nên bật để chạy ổn định.</string>
     <string name="btn_battery_fix">Bỏ qua tối ưu pin cho app này</string>
 
     <string name="notif_channel_name">Camera giám sát</string>

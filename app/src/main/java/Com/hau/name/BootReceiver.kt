@@ -31,5 +31,8 @@ class BootReceiver : BroadcastReceiver() {
             putExtra(CameraStreamService.EXTRA_ROOM_CODE, fixedCode)
         }
         ContextCompat.startForegroundService(context, serviceIntent)
+        // Đánh dấu phiên đang chạy thật — để nếu người dùng mở lại CameraActivity sau khi máy
+        // vừa khởi động lại, UI hiện đúng là "đang hoạt động" thay vì trống trơn.
+        prefs.edit().putBoolean(CameraActivity.KEY_SESSION_ACTIVE, true).apply()
     }
 }

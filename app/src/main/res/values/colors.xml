@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Nền icon app: xanh dương đậm - gợi liên tưởng "công nghệ/tin cậy", thường thấy ở các
-         app hỗ trợ từ xa (TeamViewer, AnyDesk...). -->
+    <!-- Nền icon app: xanh dương đậm - gợi liên tưởng "công nghệ/tin cậy", phù hợp cho app
+         an ninh/giám sát gia đình. -->
     <color name="ic_launcher_background">#1B3A70</color>
-    <!-- Lớp "màn hình" bên trong điện thoại - xanh dương sáng hơn để tạo chiều sâu -->
-    <color name="ic_launcher_screen">#4C8DFF</color>
-    <!-- Con trỏ chuột - cam sáng, nổi bật trên nền xanh để rõ ý "đang điều khiển" -->
-    <color name="ic_launcher_cursor">#FFB020</color>
+    <!-- Vòng kính ống kính camera - xanh dương sáng hơn để tạo chiều sâu, nổi bật trên nền -->
+    <color name="ic_launcher_lens">#4C8DFF</color>
+    <!-- Chấm đỏ "đang ghi/đang trực tiếp" ở góc camera - đỏ nổi bật, đúng quy ước phổ biến
+         của các app camera/giám sát (chấm REC) -->
+    <color name="ic_launcher_rec_dot">#FF3B30</color>
 </resources>

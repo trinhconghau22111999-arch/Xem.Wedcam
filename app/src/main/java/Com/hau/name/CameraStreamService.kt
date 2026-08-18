@@ -78,6 +78,10 @@ class CameraStreamService : Service() {
             stopping = true
             cleanupSession()
             markRoomEnded()
+            // Dọn cờ "đang chạy thật" dù dừng từ notification (không mở CameraActivity) — để
+            // lần sau mở lại app, UI không hiện nhầm là đang hoạt động.
+            getSharedPreferences(CameraActivity.PREFS_NAME, MODE_PRIVATE).edit()
+                .putBoolean(CameraActivity.KEY_SESSION_ACTIVE, false).apply()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -175,6 +179,13 @@ class CameraStreamService : Service() {
      * Theo dõi danh sách máy xem trên Firebase (rooms/{code}/viewers). Mỗi máy xem MỚI xuất
      * hiện lần đầu (onChildAdded) được cấp 1 kênh kết nối riêng, tối đa [MAX_VIEWERS_PER_CAMERA].
      * Máy xem rời hẳn (onChildRemoved — do chủ động ngắt) được dọn dẹp, giải phóng slot.
+     *
+     * DỌN "VIEWER MA": nếu máy xem bị tắt đột ngột (mất pin, force-close, rớt mạng vĩnh viễn),
+     * Firebase chỉ tự xoá field "present" (qua onDisconnect()) — KHÔNG xoá cả node viewerId,
+     * để lại dữ liệu rác (gen/, hostGeneration). Khi camera khởi động lại, Firebase bắn
+     * onChildAdded cho MỌI child hiện có, kể cả node rác này. Máy xem thật LUÔN ghi "present"
+     * TRƯỚC khi camera kịp thấy node được tạo (xem SignalingClient.start()), nên node nào
+     * KHÔNG có "present" chắc chắn là rác — xoá ngay, không cấp slot cho nó.
      */
     private fun watchViewers(code: String) {
         val ref = FirebaseDatabase.getInstance().reference.child("rooms").child(code).child("viewers")
@@ -183,6 +194,11 @@ class CameraStreamService : Service() {
             override fun onChildAdded(snapshot: DataSnapshot, prevKey: String?) {
                 val viewerId = snapshot.key ?: return
                 if (viewerConns.containsKey(viewerId)) return
+                if (!snapshot.hasChild("present")) {
+                    Log.d(TAG, "Dọn viewer rác (không có 'present'): $viewerId")
+                    snapshot.ref.removeValue()
+                    return
+                }
                 if (viewerConns.size >= MAX_VIEWERS_PER_CAMERA) {
                     Log.w(TAG, "Đã đủ $MAX_VIEWERS_PER_CAMERA máy xem, bỏ qua máy xem mới: $viewerId")
                     return
@@ -266,11 +282,14 @@ class CameraStreamService : Service() {
         conn.reconnectRunnable?.let { handler.postDelayed(it, delay) }
     }
 
-    /** Chỉ đánh dấu phòng đã đóng — mã cố định KHÔNG bị xoá, giữ lại dùng cho lần sau. */
+    /** Chỉ đánh dấu phòng đã đóng — mã cố định KHÔNG bị xoá, giữ lại dùng cho lần sau.
+     *  Gọi từ CẢ 2 đường dừng camera (nút "Kết thúc" trên notification VÀ nút trong app) để
+     *  luôn dọn sạch danh sách máy xem trên Firebase như nhau, không để rác lại tuỳ đường dừng. */
     private fun markRoomEnded() {
         roomCode?.let { code ->
-            FirebaseDatabase.getInstance().reference
-                .child("rooms").child(code).child("viewers").removeValue()
+            val roomRef = FirebaseDatabase.getInstance().reference.child("rooms").child(code)
+            roomRef.child("status").setValue("ended")
+            roomRef.child("viewers").removeValue()
         }
     }
 

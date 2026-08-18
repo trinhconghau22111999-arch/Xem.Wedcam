@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RemoteAssist"
+rootProject.name = "HomeCamera"
 include(":app")

@@ -31,7 +31,7 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.RemoteAssist">
+        android:theme="@style/Theme.HomeCamera">
 
         <!-- Màn hình chọn vai trò: Camera hay Máy Xem -->
         <activity
