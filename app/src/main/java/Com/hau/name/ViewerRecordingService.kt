@@ -15,13 +15,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import Com.hau.name.webrtc.PeerConnectionManager
 import Com.hau.name.webrtc.SignalingClient
-import Com.hau.name.drive.DriveAccountManager
-import Com.hau.name.drive.DriveResetScheduler
-import Com.hau.name.drive.DriveUploader
+import Com.hau.name.storage.LocalRetentionCleaner
+import Com.hau.name.storage.videosDir
 import org.webrtc.EglBase
 import org.webrtc.VideoSink
 import org.webrtc.VideoTrack
-import java.io.File
 
 private const val TAG = "ViewerRecordingService"
 
@@ -78,9 +76,9 @@ private class CameraSession(
  * - Quản lý tối đa [MAX_CAMERAS] kết nối WebRTC song song, mỗi kết nối tới 1 Máy Camera
  *   khác nhau (mỗi máy có mã 6 số riêng), mỗi camera có 1 "chỗ" cố định (A)/(B)/(C)/(D).
  * - Tối đa [MAX_RECORDING_CAMERAS] trong số đó được BẬT GHI HÌNH (SegmentedRecorder, cắt
- *   đoạn 15 phút). KHÔNG lưu gì trên máy xem — mỗi đoạn ghi xong được đẩy thẳng vào
- *   [Com.hau.name.drive.DriveUploader] để lưu luân phiên lên các tài khoản Google Drive
- *   đã đăng nhập; các camera còn lại chỉ dùng để xem trực tiếp (live view), không ghi.
+ *   đoạn 15 phút). Mỗi đoạn ghi xong được LƯU THẲNG VÀ VĨNH VIỄN trên chính máy xem này
+ *   (thư mục [Com.hau.name.storage.videosDir], không có Drive/upload/server nào ở giữa);
+ *   các camera còn lại chỉ dùng để xem trực tiếp (live view), không ghi.
  * - Mỗi camera tự động thử kết nối lại theo backoff khi rớt mạng/mất kết nối, độc lập
  *   với các camera khác — 1 camera rớt không ảnh hưởng camera khác.
  * - Toàn bộ chạy nền, độc lập vòng đời Activity.
@@ -97,9 +95,7 @@ class ViewerRecordingService : Service() {
     private var peerFactory: org.webrtc.PeerConnectionFactory? = null
     private val handler = Handler(Looper.getMainLooper())
 
-    private lateinit var driveAccountManager: DriveAccountManager
-    private lateinit var driveUploader: DriveUploader
-    private lateinit var driveResetScheduler: DriveResetScheduler
+    private lateinit var retentionCleaner: LocalRetentionCleaner
 
     var listener: Listener? = null
     interface Listener {
@@ -110,11 +106,8 @@ class ViewerRecordingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        driveAccountManager = DriveAccountManager(this)
-        driveUploader = DriveUploader(this, driveAccountManager)
-        driveResetScheduler = DriveResetScheduler(this, driveAccountManager)
-        driveResetScheduler.start()
-        driveUploader.resumePendingUploads() // video nào chưa upload xong ở lần chạy trước sẽ được thử lại
+        retentionCleaner = LocalRetentionCleaner(this)
+        retentionCleaner.start()
         restorePersistedCameras()
     }
 
@@ -185,9 +178,6 @@ class ViewerRecordingService : Service() {
     private fun newViewerId(): String = java.util.UUID.randomUUID().toString().take(12)
 
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
-
-    fun getDriveAccountManager(): DriveAccountManager = driveAccountManager
-    fun getDriveResetScheduler(): DriveResetScheduler = driveResetScheduler
 
     fun listCameras(): List<CameraSummary> = sessions.values.map {
         CameraSummary(it.roomCode, it.label, it.slot, it.recordingEnabled, it.state)
@@ -338,18 +328,16 @@ class ViewerRecordingService : Service() {
 
     private fun attachRecorder(session: CameraSession, track: VideoTrack) {
         if (session.segmentedRecorder != null) return
-        val outDir = File(getExternalFilesDir(null), "HomeCamera_tmp_${session.roomCode}")
+        // Ghi thẳng vào thư mục lưu VĨNH VIỄN trên máy xem — không có thư mục tạm/hàng đợi
+        // upload nào nữa, file đã ở đúng chỗ cuối cùng ngay khi đoạn 15 phút được chốt xong.
         val recorder = SegmentedRecorder(
             eglContext = eglBase.eglBaseContext,
-            outputDir = outDir,
+            outputDir = videosDir(this),
+            cameraLabel = session.label,
+            slotLetter = slotLetter(session.slot),
             segmentDurationMs = 15 * 60 * 1000L, // mỗi video chỉ 15 phút theo yêu cầu
             onSegmentSaved = { file, startedAtMs ->
-                Log.d(TAG, "Đoạn video camera ${session.roomCode} đã ghi xong: ${file.name} — đưa vào hàng đợi upload Drive")
-                // KHÔNG lưu gì trên máy xem — video được đẩy thẳng vào hàng đợi upload luân
-                // phiên qua các tài khoản Google Drive đã đăng nhập (xem DriveUploader).
-                // Truyền kèm THỜI ĐIỂM THỰC bắt đầu ghi đoạn này (không phải giờ upload) để
-                // ghép đúng hàng giữa các camera khi xem lại.
-                driveUploader.enqueueUpload(file, session.label, slotLetter(session.slot), startedAtMs)
+                Log.d(TAG, "Đoạn video camera ${session.roomCode} đã ghi xong và lưu trên máy: ${file.name}")
             }
         )
         session.segmentedRecorder = recorder
@@ -405,6 +393,7 @@ class ViewerRecordingService : Service() {
         peerFactory?.dispose()
         peerFactory = null
         eglBase.release()
+        retentionCleaner.stop()
         super.onDestroy()
     }
 

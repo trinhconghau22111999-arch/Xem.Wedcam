@@ -43,16 +43,12 @@ dependencies {
     // Firebase — dùng làm Signaling Server (không cần tự dựng server riêng)
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-database-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
 
     // WebRTC — truyền video màn hình theo thời gian thực
     implementation("io.github.webrtc-sdk:android:125.6422.06.1")
 
     // Coroutines cho xử lý bất đồng bộ
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Đăng nhập nhiều tài khoản Google + quyền Drive để lưu video (thay cho lưu trên máy)
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // lifecycleScope dùng để chạy coroutine tải danh sách video / thumbnail gắn với vòng đời Activity
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")

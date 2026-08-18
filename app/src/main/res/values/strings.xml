@@ -17,15 +17,11 @@
     <string name="btn_add_camera">+ Thêm camera</string>
     <string name="btn_grid_2x2">Tạo bảng 2x2</string>
     <string name="btn_grid_list">Xem dạng danh sách</string>
-    <string name="checkbox_recording">Lưu video (lên Drive)</string>
+    <string name="checkbox_recording">Lưu video (trên máy này)</string>
     <string name="checkbox_recording_limit_reached">Đã đủ số camera được phép lưu video — camera này chỉ xem trực tiếp</string>
 
-    <string name="drive_section_title">Lưu video vào Google Drive (không lưu trên máy)</string>
-    <string name="btn_add_drive_account">+ Đăng nhập tài khoản Google</string>
-    <string name="btn_drive_reset_settings">⚙ Số ngày giữ video</string>
-    <string name="btn_drive_remove">Gỡ</string>
-    <string name="drive_max_accounts_reached">Đã đủ tối đa 20 tài khoản Google Drive</string>
-    <string name="drive_account_already_added">Tài khoản này đã được đăng nhập rồi</string>
+    <string name="storage_section_title">Video được lưu vĩnh viễn trên máy này</string>
+    <string name="btn_video_retention_settings">⚙ Số ngày giữ video</string>
 
     <string name="btn_open_gallery">Xem video đã lưu</string>
     <string name="gallery_title">Video đã lưu (theo camera)</string>
@@ -46,5 +42,5 @@
 
     <string name="viewer_notif_channel_name">Đang xem/ghi hình camera</string>
     <string name="viewer_notif_title">Đang xem camera giám sát</string>
-    <string name="viewer_notif_text">Video được lưu liên tục theo từng đoạn 15 phút vào Google Drive.</string>
+    <string name="viewer_notif_text">Video được lưu liên tục theo từng đoạn 15 phút ngay trên máy này.</string>
 </resources>

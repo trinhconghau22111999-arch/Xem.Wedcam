@@ -40,9 +40,13 @@ private const val TAG = "SegmentedRecorder"
 class SegmentedRecorder(
     private val eglContext: EglBase.Context,
     private val outputDir: File,
+    /** Tên gợi nhớ + chữ cái chỗ (A)/(B)/(C)/(D) của camera này — gắn vào tên file để
+     *  VideoGalleryActivity/LocalVideoStore ghép đúng hàng và đúng cột khi xem lại. */
+    private val cameraLabel: String,
+    private val slotLetter: Char,
     private val segmentDurationMs: Long = 30 * 60 * 1000L,
-    /** (file, thời điểm THỰC bắt đầu ghi đoạn này - epoch ms) — dùng thời điểm này (KHÔNG phải
-     *  giờ upload lên Drive) để ghép đúng hàng giữa các camera khi xem lại. */
+    /** (file, thời điểm THỰC bắt đầu ghi đoạn này - epoch ms) — file đã nằm SẴN Ở VỊ TRÍ LƯU
+     *  VĨNH VIỄN khi callback này chạy, không cần di chuyển/upload gì thêm. */
     private val onSegmentSaved: (File, Long) -> Unit = { _, _ -> }
 ) : VideoSink {
 
@@ -127,7 +131,7 @@ class SegmentedRecorder(
         // KHÔNG phải "15 phút kể từ lúc bắt đầu ghi" — nhờ vậy các camera ghi độc lập, bắt đầu
         // lệch giờ nhau (tự kết nối lại, thêm camera sau...) vẫn cùng cắt đoạn tại cùng 1 thời
         // điểm tuyệt đối, giúp video các camera khác nhau nhưng cùng khung giờ khớp đúng 1 hàng
-        // khi xem lại (xem VideoGalleryActivity / VideoIndexer.buildTimeAlignedRows).
+        // khi xem lại (xem VideoGalleryActivity / LocalVideoStore.buildTimeAlignedRows).
         val delay = segmentDurationMs - (startedAtMs % segmentDurationMs)
         handler.postDelayed(rotateRunnable, delay)
         startDrainThread(codec, newMuxer, file)
@@ -243,7 +247,8 @@ class SegmentedRecorder(
     }
 
     private fun fileNameFor(date: Date): String {
+        val safeLabel = cameraLabel.replace(Regex("""[\\/:*?"<>|]"""), " ").trim()
         val fmt = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
-        return "cam_${fmt.format(date)}.mp4"
+        return "$safeLabel ($slotLetter) ${fmt.format(date)}.mp4"
     }
 }

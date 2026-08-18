@@ -15,10 +15,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import Com.hau.name.drive.DriveAccountManager
-import Com.hau.name.drive.GalleryRow
-import Com.hau.name.drive.VideoEntry
-import Com.hau.name.drive.VideoIndexer
+import Com.hau.name.storage.GalleryRow
+import Com.hau.name.storage.VideoEntry
+import Com.hau.name.storage.LocalVideoStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,16 +28,15 @@ import java.util.Locale
  * Danh sách video đã lưu, dạng bảng 4 cột (A)/(B)/(C)/(D) — cột nào hiển thị video của camera
  * đó. Mỗi HÀNG ứng với đúng 1 mốc thời gian thực (làm tròn 15 phút, khớp thời lượng 1 đoạn
  * video) — video của các camera khác nhau quay CÙNG khung giờ đó sẽ nằm CÙNG 1 hàng, đúng cột
- * của camera đó (xem [VideoIndexer.buildTimeAlignedRows]). Camera nào không ghi được đoạn nào
- * trong khung giờ đó thì ô tương ứng để trống (mờ đi). Video lấy từ TẤT CẢ tài khoản Drive đã
- * đăng nhập, gộp lại theo tên file "tênCam (X).mp4".
+ * của camera đó (xem [LocalVideoStore.buildTimeAlignedRows]). Camera nào không ghi được đoạn nào
+ * trong khung giờ đó thì ô tương ứng để trống (mờ đi). Video đọc thẳng từ thư mục lưu cục bộ
+ * trên máy xem, gộp lại theo tên file "tênCam (X) giờ.mp4".
  *
  * - Nhấn giữ 1 ô để bật chế độ chọn, nhấn thêm các ô KHÁC trong CÙNG 1 HÀNG (tối đa 4, đúng
  *   4 cột A-D) để chọn cùng lúc 2/3/4 video, rồi bấm "Xem cùng lúc" để mở [MultiViewPlayerActivity].
  */
 class VideoGalleryActivity : AppCompatActivity() {
 
-    private lateinit var accountManager: DriveAccountManager
     private lateinit var rowsContainer: LinearLayout
     private lateinit var progress: ProgressBar
     private lateinit var barActions: LinearLayout
@@ -59,7 +57,6 @@ class VideoGalleryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_video_gallery)
 
-        accountManager = DriveAccountManager(this)
         rowsContainer = findViewById(R.id.gallery_rows_container)
         progress = findViewById(R.id.progress_loading)
         barActions = findViewById(R.id.bar_selection_actions)
@@ -81,13 +78,13 @@ class VideoGalleryActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val entries = try {
-                VideoIndexer.fetchAll(this@VideoGalleryActivity, accountManager)
+                LocalVideoStore.listAll(this@VideoGalleryActivity)
             } catch (e: Exception) {
-                Toast.makeText(this@VideoGalleryActivity, "Không tải được danh sách video: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@VideoGalleryActivity, "Không đọc được danh sách video: ${e.message}", Toast.LENGTH_LONG).show()
                 emptyList()
             }
             allEntries = entries
-            rows = VideoIndexer.buildTimeAlignedRows(entries)
+            rows = LocalVideoStore.buildTimeAlignedRows(entries)
             progress.visibility = View.GONE
             renderHeaders()
             renderRows()
@@ -98,7 +95,7 @@ class VideoGalleryActivity : AppCompatActivity() {
         val letters = charArrayOf('A', 'B', 'C', 'D')
         val ids = intArrayOf(R.id.header_col_a, R.id.header_col_b, R.id.header_col_c, R.id.header_col_d)
         for (i in letters.indices) {
-            val label = VideoIndexer.latestLabelForSlot(allEntries, letters[i]) ?: "—"
+            val label = LocalVideoStore.latestLabelForSlot(allEntries, letters[i]) ?: "—"
             findViewById<TextView>(ids[i]).text = "(${letters[i]}) $label"
         }
     }
@@ -203,14 +200,9 @@ class VideoGalleryActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val bmp = try {
                 withContext(Dispatchers.IO) {
-                    val token = Com.hau.name.drive.DriveRest.getAccessToken(this@VideoGalleryActivity, entry.accountEmail)
                     val retriever = MediaMetadataRetriever()
-                    // Overload nhận headers -> đọc được vài giây đầu qua HTTP để lấy khung hình đại
-                    // diện, KHÔNG cần tải cả file — đủ dùng để hiện ảnh nhỏ trong bảng.
-                    retriever.setDataSource(
-                        "https://www.googleapis.com/drive/v3/files/${entry.fileId}?alt=media",
-                        mapOf("Authorization" to "Bearer $token")
-                    )
+                    // File cục bộ ngay trên máy -> đọc thẳng, không cần token hay gọi mạng gì cả.
+                    retriever.setDataSource(entry.file.absolutePath)
                     val frame = retriever.getFrameAtTime(0)
                     retriever.release()
                     frame

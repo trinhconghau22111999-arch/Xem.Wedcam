@@ -1,28 +1,36 @@
-# Remote Assist
+# Camera Giám Sát Gia Đình
 
-Ứng dụng hỗ trợ điều khiển từ xa minh bạch: một máy có thể xem và điều khiển
-máy kia **chỉ sau khi** người dùng máy bị điều khiển chủ động đồng ý và tạo mã
-ghép nối. Không có hành vi ẩn giấu — mọi quyền đều xin qua hộp thoại hệ thống
-chuẩn của Android, và banner "Đang chia sẻ màn hình" luôn hiển thị trong suốt
-phiên làm việc kèm nút ngắt kết nối.
+Ứng dụng biến 1 điện thoại cũ thành camera giám sát, xem trực tiếp từ điện thoại
+khác. Video được ghi lại theo từng đoạn 15 phút và lưu **vĩnh viễn ngay trên
+chính máy xem** — không dùng Google Drive hay bất kỳ server lưu trữ nào ở giữa.
 
 ## Kiến trúc
 
-- **Máy B (được điều khiển):** `ConsentActivity` → `RemoteHostService` →
-  `InputInjectionService`
-- **Máy A (điều khiển):** `ControllerActivity`
-- **Signaling:** Firebase Realtime Database (không cần tự dựng server)
-- **Truyền video:** WebRTC
+- **Máy Camera (điện thoại đặt cố định):** `CameraActivity` → `CameraStreamService`
+  — tự chọn ống kính sau có góc nhìn rộng nhất, quay 1280x720@20fps, phục vụ
+  tối đa 4 máy xem cùng lúc qua WebRTC.
+- **Máy Xem:** `ViewerActivity` → `ViewerRecordingService` (chạy nền, không phụ
+  thuộc màn hình có mở hay không)
+  - Xem trực tiếp nhiều camera cùng lúc (danh sách hoặc lưới 2x2).
+  - Ghi hình tối đa vài camera song song, cắt đoạn 15 phút (`SegmentedRecorder`),
+    căn đúng mốc giờ tường (:00/:15/:30/:45) để ghép hàng đúng giữa các camera.
+  - `storage/LocalVideoStore.kt`: lưu video vĩnh viễn trong thư mục riêng của
+    app trên máy xem, có thể đặt số ngày tự xoá video cũ để đỡ đầy máy.
+  - `VideoGalleryActivity` + `MultiViewPlayerActivity`: xem lại video đã lưu,
+    phát thẳng từ file cục bộ (không cần tải/stream qua mạng).
+- **Signaling (ghép nối 2 máy):** Firebase Realtime Database — không cần tự
+  dựng server riêng.
+- **Truyền video trực tiếp:** WebRTC.
 
 ## Bước 1 — Tạo dự án Firebase
 
-Dự án Firebase của bạn: **checkinonline-785d5**
-Package name Android đã đăng ký: **Com.hau.name**
-
-1. File `app/google-services.json` đã được đặt sẵn trong project này.
-2. Trong Firebase Console → **Realtime Database** → **Create database** →
-   chọn chế độ **test mode** để bắt đầu (sau đó siết lại rule khi dùng thật,
-   xem gợi ý rule bên dưới).
+1. Tạo project trên [Firebase Console](https://console.firebase.google.com),
+   thêm app Android với package name khớp `applicationId` trong
+   `app/build.gradle.kts`.
+2. Tải file `google-services.json` từ Firebase Console, đặt vào `app/`
+   (file này đã có trong `.gitignore`, sẽ không bị commit lên repo public).
+3. Firebase Console → **Realtime Database** → **Create database** → chọn
+   **test mode** để bắt đầu (siết lại rule khi dùng thật, xem gợi ý bên dưới).
 
 ### Gợi ý Realtime Database Rules (siết bảo mật cơ bản)
 
@@ -46,62 +54,44 @@ ghi đè phòng của người khác.
 
 ## Bước 2 — Build APK bằng GitHub Actions (không cần máy tính cài Android Studio)
 
-1. Tạo repo GitHub mới, đẩy toàn bộ thư mục này lên (file `app/google-services.json`
-   sẽ tự động bị Git bỏ qua nhờ `.gitignore` — không lo lộ lên repo public).
-2. Vào repo → **Settings → Secrets and variables → Actions → New repository
-   secret**, đặt tên `GOOGLE_SERVICES_JSON_BASE64`, dán chuỗi base64 sau vào
-   (đã được tạo sẵn từ file bạn cung cấp, không cần tự mã hóa lại):
-
+1. Vào repo → **Settings → Secrets and variables → Actions → New repository
+   secret**, đặt tên `GOOGLE_SERVICES_JSON_BASE64`, dán vào giá trị là chuỗi
+   base64 của file `google-services.json` bạn tải ở Bước 1:
    ```
-   ⚠️ ĐÃ XOÁ — chuỗi base64 gốc chứa API key + Firebase URL thật đã bị dán
-   nhầm trực tiếp vào README (thay vì chỉ lưu trong GitHub Secret), khiến
-   dự án Firebase bị public. Key đó coi như đã lộ vĩnh viễn (vẫn còn trong
-   lịch sử Git) — cần rotate API key trong Google Cloud Console / Firebase
-   Console, rồi tự tạo base64 mới từ file google-services.json của bạn:
-   `base64 -w0 google-services.json` và dán riêng vào ô GitHub Secret,
-   KHÔNG dán vào file này hay bất kỳ file nào được commit lên repo.
+   base64 -w0 google-services.json
    ```
-
-
-3. Vào tab **Actions**, chạy workflow **Build Debug APK** (hoặc chỉ cần push
+   Dán kết quả vào ô Secret — **không dán vào bất kỳ file nào được commit lên
+   repo**, kể cả README này.
+2. Vào tab **Actions**, chạy workflow **Build Debug APK** (hoặc chỉ cần push
    lên nhánh `main`).
-4. Sau khi build xong, mở run vừa chạy → mục **Artifacts** → tải
-   `remote-assist-debug-apk` về, giải nén ra file `.apk`, cài vào 2 máy.
+3. Sau khi build xong, mở run vừa chạy → mục **Artifacts** → tải APK debug về,
+   cài vào 2 máy.
 
 ## Bước 3 — Cài đặt trên 2 máy
 
-**Máy B (máy sẽ cho phép điều khiển):**
-1. Mở app → chọn "Cho phép máy khác điều khiển máy này".
-2. Đọc kỹ nội dung, tick vào ô đồng ý.
-3. Bấm "Tạo mã ghép nối" → cấp quyền quay màn hình khi Android hỏi.
-4. Vào **Cài đặt → Hỗ trợ tiếp cận (Accessibility) → Ứng dụng đã cài đặt →
-   Remote Assist** → bật thủ công (bước này Android bắt buộc, không thể tự
-   động hóa).
-5. Đọc mã 6 số hiện trên màn hình cho người cần điều khiển.
+**Máy Camera (điện thoại đặt cố định, ví dụ điện thoại cũ):**
+1. Mở app → chọn vai trò "Máy Camera".
+2. Đồng ý, cấp quyền Camera khi được hỏi.
+3. Mã ghép nối 6 số hiện ra — mã này **cố định vĩnh viễn** cho máy này, đọc
+   cho người dùng máy xem.
+4. Vào **Cài đặt → Pin → Không tối ưu hoá pin** cho app này, để camera không
+   bị hệ thống tắt ngầm khi màn hình tắt lâu.
 
-**Máy A (máy điều khiển):**
-1. Mở app → chọn "Điều khiển một máy khác".
-2. Nhập mã 6 số → bấm Kết nối.
+**Máy Xem:**
+1. Mở app → chọn vai trò "Máy Xem".
+2. Bấm thêm camera → nhập mã 6 số của Máy Camera.
+3. Bật ghi hình cho camera muốn lưu lại (tối đa vài camera cùng lúc).
+4. Vào **Cài đặt → Pin → Không tối ưu hoá pin** cho app này, để việc ghi hình
+   nền không bị hệ thống dừng.
+5. Video đã ghi xem lại trong "Xem video đã lưu" — có thể chỉnh số ngày tự
+   xoá video cũ trong mục cài đặt cạnh đó.
 
-## Những phần cần hoàn thiện thêm (đánh dấu TODO trong code)
+## Nguyên tắc thiết kế cần giữ nguyên khi chỉnh sửa
 
-Bộ khung này đã có đủ: cấu trúc Gradle, Firebase, Manifest, quyền, luồng xin
-đồng ý, AccessibilityService gửi/nhận lệnh chạm. Phần **stream video WebRTC
-thật** (khởi tạo `PeerConnection`, `VideoCapturer` từ `MediaProjection`, trao
-đổi offer/answer/ICE candidates) được đánh dấu `// TODO` trong:
-
-- `RemoteHostService.kt`
-- `ControllerActivity.kt`
-
-Đây là phần code dài nhất của dự án (thường 200–400 dòng cho một
-implementation WebRTC đầy đủ) — nếu bạn muốn, mình có thể viết tiếp phần này
-ở lượt sau.
-
-## Nguyên tắc thiết kế bắt buộc giữ nguyên khi bạn chỉnh sửa
-
-- Nút "Tạo mã" luôn bị khóa cho tới khi người dùng B tự tick đồng ý.
-- Notification "Đang chia sẻ màn hình" luôn `setOngoing(true)`, không được ẩn.
-- `InputInjectionService` chỉ chuyển tiếp tọa độ chạm, không được thêm logic
-  phát hiện/chặn hành vi của người dùng máy B.
-- Mã ghép nối nên có thời hạn (gợi ý: dùng Cloud Function hoặc client tự xóa
-  room sau vài phút không kết nối) để tránh bị dùng lại.
+- Không dùng Google Drive hay bất kỳ dịch vụ lưu trữ đám mây nào — video chỉ
+  lưu trên chính máy xem.
+- Không dựng server proxy nào để phát lại video — luôn phát thẳng từ file cục bộ.
+- Mỗi đoạn ghi hình dài đúng 15 phút, căn theo mốc giờ tường (:00/:15/:30/:45)
+  để các camera khác nhau ghép đúng hàng khi xem lại.
+- Notification "Đang ghi hình / đang xem" luôn hiển thị trong lúc service nền
+  đang chạy, không được ẩn.

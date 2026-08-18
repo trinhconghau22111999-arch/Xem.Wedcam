@@ -13,16 +13,14 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import Com.hau.name.drive.DriveStreamProxy
-import Com.hau.name.drive.VideoEntry
+import Com.hau.name.storage.VideoEntry
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
  * Xem cùng lúc 2-4 video đã chọn từ [VideoGalleryActivity] (cùng 1 hàng, tức cùng 1 mốc
- * thời gian ghi). Mỗi video được PHÁT TRỰC TIẾP (stream) qua [DriveStreamProxy] — một máy chủ
- * proxy nhỏ chạy ngay trên máy này, gắn token xác thực rồi chuyển tiếp yêu cầu sang Drive —
- * KHÔNG cần tải hết file về máy trước mới xem được (có thể tua ngay cả khi đang tải).
+ * thời gian ghi). Video đã nằm sẵn trên chính máy này (không có Drive, không có proxy hay
+ * server nào) nên VideoView phát THẲNG từ file cục bộ — tua tự nhiên, không cần chờ tải.
  *
  * - Chạm 1 video đang xem cùng lúc -> video đó phóng to ra GIỮA màn hình, CÁC VIDEO KHÁC
  *   VẪN TIẾP TỤC CHẠY (không dừng) ở lưới nhỏ phía dưới lớp phóng to.
@@ -101,8 +99,7 @@ class MultiViewPlayerActivity : AppCompatActivity() {
     private fun startStreaming(index: Int) {
         val pane = panes.getOrNull(index) ?: return
         try {
-            val url = DriveStreamProxy.urlFor(this, pane.entry.fileId, pane.entry.accountEmail)
-            pane.videoView.setVideoURI(Uri.parse(url))
+            pane.videoView.setVideoURI(Uri.fromFile(pane.entry.file))
             pane.videoView.setOnPreparedListener {
                 it.isLooping = true
                 pane.progress.visibility = View.GONE

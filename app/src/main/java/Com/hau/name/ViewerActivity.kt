@@ -7,9 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
@@ -19,16 +17,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
-import com.google.android.gms.common.api.Scope
-import Com.hau.name.drive.DRIVE_SCOPE
-import Com.hau.name.drive.DriveAccount
-import Com.hau.name.drive.MAX_DRIVE_ACCOUNTS
+import Com.hau.name.storage.LocalVideoStore
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 
@@ -38,8 +29,8 @@ import org.webrtc.SurfaceViewRenderer
  *   hình trực tiếp cùng lúc, mỗi camera có 1 chỗ cố định (A)/(B)/(C)/(D).
  * - Trong số đó, tối đa [MAX_RECORDING_CAMERAS] máy được phép BẬT GHI HÌNH (ghi liên tục,
  *   cắt đoạn 15 phút); các camera còn lại chỉ xem trực tiếp.
- * - KHÔNG lưu video trên máy xem — mỗi đoạn ghi xong được lưu luân phiên vào các tài khoản
- *   Google Drive đã đăng nhập bên dưới danh sách camera (tối đa 20 tài khoản).
+ * - Video được LƯU THẲNG TRÊN CHÍNH MÁY XEM NÀY (không có Drive, không có tài khoản nào) —
+ *   xem [Com.hau.name.storage.LocalVideoStore]. Có thể đặt số ngày tự xoá video cũ để đỡ đầy máy.
  * - Toàn bộ kết nối + ghi hình chạy trong [ViewerRecordingService] ở nền, không phụ thuộc
  *   Activity đang mở hay đã thoát.
  * - KHÔNG có bất kỳ thao tác điều khiển nào được gửi sang Máy Camera — chỉ xem và ghi.
@@ -54,46 +45,6 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
     private lateinit var btnGrid: Button
     /** false = danh sách dọc (mặc định), true = lưới 2 cột x 2 dòng (tối đa 4 camera 1 màn hình). */
     private var gridMode = false
-
-    private lateinit var driveAccountsContainer: LinearLayout
-    private lateinit var textDriveSummary: TextView
-    private val driveRefreshHandler = Handler(Looper.getMainLooper())
-    private val driveRefreshRunnable = object : Runnable {
-        override fun run() {
-            refreshDriveAccountsUI()
-            driveRefreshHandler.postDelayed(this, 20_000L)
-        }
-    }
-
-    private val driveSignInClient by lazy {
-        GoogleSignIn.getClient(
-            this,
-            GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestEmail()
-                .requestScopes(Scope(DRIVE_SCOPE))
-                .build()
-        )
-    }
-
-    private val driveSignInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            val email = account.email
-            val svc = service
-            if (email == null || svc == null) return@registerForActivityResult
-            val added = svc.getDriveAccountManager().addAccount(email)
-            val already = svc.getDriveAccountManager().listAccounts().any { it.email == email }
-            when {
-                added -> Toast.makeText(this, "Đã thêm tài khoản Drive: $email", Toast.LENGTH_SHORT).show()
-                already -> Toast.makeText(this, R.string.drive_account_already_added, Toast.LENGTH_LONG).show()
-                else -> Toast.makeText(this, R.string.drive_max_accounts_reached, Toast.LENGTH_LONG).show()
-            }
-            refreshDriveAccountsUI()
-        } catch (e: ApiException) {
-            Toast.makeText(this, "Đăng nhập Google thất bại (mã ${e.statusCode})", Toast.LENGTH_LONG).show()
-        }
-    }
 
     // roomCode -> views của ô camera tương ứng, để cập nhật khi có thay đổi trạng thái
     private data class TileViews(
@@ -110,7 +61,6 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
             service = svc
             svc.listener = this@ViewerActivity
             rebuildAllTiles()
-            refreshDriveAccountsUI()
         }
         override fun onServiceDisconnected(name: ComponentName?) { service = null }
     }
@@ -129,10 +79,7 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
             applyLayoutMode()
         }
 
-        driveAccountsContainer = findViewById(R.id.drive_accounts_container)
-        textDriveSummary = findViewById(R.id.text_drive_summary)
-        findViewById<Button>(R.id.btn_add_drive_account).setOnClickListener { startAddDriveAccount() }
-        findViewById<Button>(R.id.btn_drive_reset_settings).setOnClickListener { showDriveResetSettingsDialog() }
+        findViewById<Button>(R.id.btn_video_retention_settings).setOnClickListener { showRetentionSettingsDialog() }
         findViewById<Button>(R.id.btn_open_gallery).setOnClickListener {
             startActivity(Intent(this, VideoGalleryActivity::class.java))
         }
@@ -205,7 +152,7 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         val btnRemove = view.findViewById<Button>(R.id.btn_remove)
 
         // Tên hiển thị theo đúng yêu cầu: "tên (A)" — chữ cái (A)/(B)/(C)/(D) cố định theo chỗ
-        // của camera này, dùng luôn để đặt tên file video khi lưu lên Drive (xem slotLetter()).
+        // của camera này, dùng luôn để đặt tên file video khi lưu trên máy (xem slotLetter()).
         textLabel.text = "$label (${slotLetter(slot)})"
         textStatus.text = "Đang kết nối..."
 
@@ -299,75 +246,21 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         textCount.text = "${svc.listCameras().size}/$MAX_CAMERAS camera · ${svc.recordingCount()}/$MAX_RECORDING_CAMERAS đang ghi hình"
     }
 
-    // ---- Tài khoản Google Drive (lưu video luân phiên) ----
+    // ---- Số ngày tự xoá video cũ trên máy (không còn Drive/tài khoản nào cả) ----
 
-    private fun startAddDriveAccount() {
-        val svc = service ?: return
-        if (svc.getDriveAccountManager().listAccounts().size >= MAX_DRIVE_ACCOUNTS) {
-            Toast.makeText(this, R.string.drive_max_accounts_reached, Toast.LENGTH_LONG).show()
-            return
-        }
-        // signOut() trước để hộp thoại chọn tài khoản luôn hiện ra (cho phép chọn 1 tài khoản
-        // Google KHÁC với lần trước) thay vì tự động dùng lại tài khoản đã đăng nhập gần nhất.
-        driveSignInClient.signOut().addOnCompleteListener {
-            driveSignInLauncher.launch(driveSignInClient.signInIntent)
-        }
-    }
-
-    private fun refreshDriveAccountsUI() {
-        val svc = service ?: return
-        val accounts = svc.getDriveAccountManager().listAccounts() // đã sắp theo order (trên xuống dưới)
-        driveAccountsContainer.removeAllViews()
-        accounts.forEachIndexed { index, acc -> driveAccountsContainer.addView(buildDriveAccountChip(acc, index)) }
-        textDriveSummary.text = "${accounts.size}/$MAX_DRIVE_ACCOUNTS tài khoản đã đăng nhập"
-    }
-
-    private fun buildDriveAccountChip(acc: DriveAccount, indexInOrder: Int): View {
-        val view = LayoutInflater.from(this).inflate(R.layout.item_drive_account, driveAccountsContainer, false)
-        val textOrder = view.findViewById<TextView>(R.id.text_drive_order)
-        val textEmail = view.findViewById<TextView>(R.id.text_drive_email)
-        val textStatus = view.findViewById<TextView>(R.id.text_drive_status)
-        val btnRemove = view.findViewById<Button>(R.id.btn_drive_remove)
-
-        textOrder.text = if (indexInOrder == 0) "#1 (đang lưu vào đây)" else "#${indexInOrder + 1}"
-        textEmail.text = acc.email
-        textStatus.text = when {
-            acc.totalBytes <= 0 -> "Chưa kiểm tra dung lượng"
-            acc.totalBytes == Long.MAX_VALUE -> "Không giới hạn dung lượng"
-            else -> {
-                val pct = (acc.usedBytes * 100 / acc.totalBytes).coerceIn(0, 100)
-                "Đã dùng $pct%" + if (acc.isNearFullCached()) " · gần đầy" else ""
-            }
-        }
-        btnRemove.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Gỡ tài khoản Drive")
-                .setMessage("Gỡ ${acc.email} khỏi danh sách lưu video? (Video đã lưu trong Drive tài khoản này KHÔNG bị xoá.)")
-                .setPositiveButton("Gỡ") { _, _ ->
-                    service?.getDriveAccountManager()?.removeAccount(acc.email)
-                    refreshDriveAccountsUI()
-                }
-                .setNegativeButton("Huỷ", null)
-                .show()
-        }
-        return view
-    }
-
-    private fun showDriveResetSettingsDialog() {
-        val svc = service ?: return
-        val mgr = svc.getDriveAccountManager()
+    private fun showRetentionSettingsDialog() {
         val editDays = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(mgr.retentionDays.toString())
+            setText(LocalVideoStore.getRetentionDays(this@ViewerActivity).toString())
             hint = "Số ngày (0 = giữ vĩnh viễn)"
         }
         AlertDialog.Builder(this)
-            .setTitle("Tự xoá video cũ để giải phóng bộ nhớ")
-            .setMessage("Mỗi VIDEO được giữ lại bao nhiêu ngày kể từ lúc quay thì tự xoá đúng video đó (không xoá cả tài khoản) — video còn trong hạn không bị ảnh hưởng. Đặt 0 để giữ video vĩnh viễn cho tới khi tài khoản đầy dung lượng thật.")
+            .setTitle("Tự xoá video cũ để giải phóng bộ nhớ máy")
+            .setMessage("Mỗi VIDEO được giữ lại bao nhiêu ngày kể từ lúc quay thì tự xoá đúng video đó trên máy — video còn trong hạn không bị ảnh hưởng. Đặt 0 để giữ video vĩnh viễn cho tới khi máy đầy dung lượng thật.")
             .setView(editDays)
             .setPositiveButton("Lưu") { _, _ ->
                 val days = editDays.text.toString().toIntOrNull() ?: 0
-                mgr.retentionDays = days
+                LocalVideoStore.setRetentionDays(this@ViewerActivity, days)
                 Toast.makeText(this, "Đã lưu: giữ video $days ngày", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Huỷ", null)
@@ -392,7 +285,6 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
         // để các camera vẫn tiếp tục kết nối/ghi hình khi thoát màn hình xem.
         service?.let { svc -> tiles.forEach { (code, tile) -> svc.detachPreview(code, tile.renderer) } }
         if (bound) { unbindService(connection); bound = false }
-        driveRefreshHandler.removeCallbacks(driveRefreshRunnable)
     }
 
     override fun onStart() {
@@ -401,8 +293,6 @@ class ViewerActivity : AppCompatActivity(), ViewerRecordingService.Listener {
             bindService(Intent(this, ViewerRecordingService::class.java), connection, Context.BIND_AUTO_CREATE)
             bound = true
         }
-        driveRefreshHandler.post(driveRefreshRunnable)
-
         findViewById<View>(R.id.banner_battery).visibility =
             if (BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) View.GONE else View.VISIBLE
     }

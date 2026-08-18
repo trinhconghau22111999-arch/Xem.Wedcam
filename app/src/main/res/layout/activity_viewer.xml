@@ -83,9 +83,8 @@
                 android:layout_marginVertical="4dp"
                 android:background="#DDDDDD" />
 
-            <!-- Khu vực lưu trữ: bên dưới toàn bộ khung camera — đăng nhập nhiều tài khoản
-                 Google, video được lưu luân phiên vào Drive các tài khoản này, KHÔNG lưu trên
-                 máy xem. Tối đa 20 tài khoản. -->
+            <!-- Khu vực lưu trữ: video được lưu VĨNH VIỄN ngay trên máy xem này, không có Drive
+                 hay tài khoản nào cả — chỉ có nút xem lại và cài đặt số ngày tự xoá video cũ. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -95,30 +94,8 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/drive_section_title"
+                    android:text="@string/storage_section_title"
                     android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/text_drive_summary"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:textSize="12sp"
-                    android:textColor="#666666"
-                    tools:text="0/20 tài khoản đã đăng nhập" />
-
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:scrollbars="none">
-
-                    <LinearLayout
-                        android:id="@+id/drive_accounts_container"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal" />
-                </HorizontalScrollView>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -127,25 +104,18 @@
                     android:orientation="horizontal">
 
                     <Button
-                        android:id="@+id/btn_add_drive_account"
+                        android:id="@+id/btn_open_gallery"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/btn_add_drive_account" />
+                        android:text="@string/btn_open_gallery" />
 
                     <Button
-                        android:id="@+id/btn_drive_reset_settings"
+                        android:id="@+id/btn_video_retention_settings"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="8dp"
-                        android:text="@string/btn_drive_reset_settings" />
+                        android:text="@string/btn_video_retention_settings" />
                 </LinearLayout>
-
-                <Button
-                    android:id="@+id/btn_open_gallery"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/btn_open_gallery" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
